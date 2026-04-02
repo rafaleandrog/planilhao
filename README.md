@@ -114,3 +114,41 @@ Para eu finalizar tudo exatamente com seus nomes reais do Airtable, preciso que 
 5. Se você quer sync **somente Airtable -> Supabase** ou também retorno (bidirecional).
 
 Se você me mandar um print de cada tabela com os nomes das colunas, eu te devolvo o `mapping.json` pronto.
+
+---
+
+## 6) Codex + Supabase (MCP) para revisão/atualização por comando
+
+Este repositório agora inclui um orquestrador para você disparar tarefas no Codex por comando e já orientar o uso do Supabase via MCP.
+
+### 6.1 Configurar MCP do Supabase no Codex
+
+1. Copie `.codex/config.toml.example` para `~/.codex/config.toml` (ou mescle com sua config atual).
+2. Rode login do provedor:
+
+```bash
+codex mcp login supabase
+```
+
+### 6.2 Disparar tarefa para o Codex executar sozinho
+
+```bash
+npm run codex:task -- --goal "Revise o app.js, proponha melhorias e aplique as correções"
+```
+
+Esse comando usa `scripts/codex-supabase-orchestrator.mjs`, que:
+
+- monta um prompt padronizado para revisão + atualização;
+- força comportamento seguro (mudanças pequenas e checks);
+- tenta invocar o Codex CLI automaticamente.
+
+### 6.3 Validar prompt sem executar
+
+```bash
+npm run codex:task -- --goal "Criar migration para novo campo" --dry-run
+```
+
+### Observação importante
+
+Mesmo com MCP, o Codex não faz alteração “sozinho em background” sem gatilho.
+Você dispara via comando (como acima) ou automatiza esse comando num scheduler/CI.
