@@ -1,12 +1,14 @@
 -- Estrutura mínima para o painel habitacional
 create table if not exists public.setores (
   id bigint generated always as identity primary key,
+  airtable_id text unique,
   nome text not null,
   descricao text
 );
 
 create table if not exists public.empreendimentos (
   id bigint generated always as identity primary key,
+  airtable_id text unique,
   setor_id bigint not null references public.setores(id) on delete cascade,
   nome text not null,
   status_registro text,
@@ -15,6 +17,7 @@ create table if not exists public.empreendimentos (
 
 create table if not exists public.unidades (
   id bigint generated always as identity primary key,
+  airtable_id text unique,
   empreendimento_id bigint not null references public.empreendimentos(id) on delete cascade,
   endereco text not null,
   matricula text,
@@ -27,6 +30,7 @@ create table if not exists public.unidades (
 
 create table if not exists public.proprietarios (
   id bigint generated always as identity primary key,
+  airtable_id text unique,
   nome text not null,
   cpf text,
   telefone text,
@@ -41,6 +45,7 @@ create table if not exists public.unidade_proprietarios (
 
 create table if not exists public.transacoes (
   id bigint generated always as identity primary key,
+  airtable_id text unique,
   unidade_id bigint not null references public.unidades(id) on delete cascade,
   tipo text not null,
   valor numeric(14,2) not null,
