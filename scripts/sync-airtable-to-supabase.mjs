@@ -17,16 +17,49 @@ const {
   SUPABASE_SERVICE_ROLE_KEY
 } = process.env;
 
+// Valida variáveis obrigatórias antes de qualquer outra operação
 if (!AIRTABLE_TOKEN || !AIRTABLE_BASE_ID || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Faltam variáveis obrigatórias no .env (Airtable e Supabase).');
+  console.error(
+    '❌ Faltam variáveis obrigatórias. Configure os secrets no GitHub:\n' +
+    '   AIRTABLE_TOKEN, AIRTABLE_BASE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY'
+  );
+  process.exit(1);
 }
-
-const mappingFile = path.resolve(rootDir, AIRTABLE_MAPPING_PATH);
-const mapping = JSON.parse(await fs.readFile(mappingFile, 'utf-8'));
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false }
 });
+
+async function loadMapping() {
+  const mappingFile = path.resolve(rootDir, AIRTABLE_MAPPING_PATH);
+
+  let raw;
+  try {
+    raw = await fs.readFile(mappingFile, 'utf-8');
+  } catch {
+    throw new Error(
+      `Arquivo de mapeamento não encontrado: ${mappingFile}\n` +
+      'Configure o secret AIRTABLE_MAPPING_JSON no GitHub ou crie o arquivo localmente.'
+    );
+  }
+
+  if (!raw.trim()) {
+    throw new Error(
+      `Arquivo de mapeamento está vazio: ${mappingFile}\n` +
+      'Verifique se o secret AIRTABLE_MAPPING_JSON está configurado no repositório.'
+    );
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `JSON inválido no arquivo de mapeamento: ${mappingFile}\n` +
+      `Erro: ${err.message}\n` +
+      'Verifique o conteúdo do secret AIRTABLE_MAPPING_JSON.'
+    );
+  }
+}
 
 async function fetchAirtableTable(tableName) {
   const records = [];
@@ -96,7 +129,10 @@ async function upsertRows(table, rows) {
 }
 
 async function sync() {
+  const mapping = await loadMapping();
   const cfg = mapping.tables;
+
+  console.log('🔄 Iniciando sincronização Airtable → Supabase...');
 
   const setoresRaw = await fetchAirtableTable(cfg.setores.name);
   await upsertRows(
@@ -107,6 +143,7 @@ async function sync() {
     }))
   );
   const setorMap = await fetchIdMap('setores');
+  console.log(`  ✓ Setores: ${setoresRaw.length} registros`);
 
   const empreendimentosRaw = await fetchAirtableTable(cfg.empreendimentos.name);
   await upsertRows(
@@ -121,6 +158,7 @@ async function sync() {
     })
   );
   const empreendimentoMap = await fetchIdMap('empreendimentos');
+  console.log(`  ✓ Empreendimentos: ${empreendimentosRaw.length} registros`);
 
   const proprietariosRaw = await fetchAirtableTable(cfg.proprietarios.name);
   await upsertRows(
@@ -131,6 +169,7 @@ async function sync() {
     }))
   );
   const proprietarioMap = await fetchIdMap('proprietarios');
+  console.log(`  ✓ Proprietários: ${proprietariosRaw.length} registros`);
 
   const unidadesRaw = await fetchAirtableTable(cfg.unidades.name);
   await upsertRows(
@@ -145,6 +184,7 @@ async function sync() {
     })
   );
   const unidadeMap = await fetchIdMap('unidades');
+  console.log(`  ✓ Unidades: ${unidadesRaw.length} registros`);
 
   const joinRows = [];
   for (const rec of unidadesRaw) {
@@ -160,6 +200,7 @@ async function sync() {
   if (joinRows.length) {
     const { error } = await supabase.from('unidade_proprietarios').upsert(joinRows, { onConflict: 'unidade_id,proprietario_id' });
     if (error) throw error;
+    console.log(`  ✓ Vínculos unidade-proprietário: ${joinRows.length} registros`);
   }
 
   const transacoesRaw = await fetchAirtableTable(cfg.transacoes.name);
@@ -174,6 +215,7 @@ async function sync() {
       };
     })
   );
+  console.log(`  ✓ Transações: ${transacoesRaw.length} registros`);
 
   console.log('✅ Sincronização concluída com sucesso.');
 }
