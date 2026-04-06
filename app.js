@@ -3,8 +3,31 @@
   var nav = document.getElementById('main-nav');
   var state = { setorTab: 'empreendimentos', empTab: 'unidades', unidadeTab: 'transacoes' };
 
-  var createClient = supabase.createClient;
-  var db = createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
+  var db = null;
+  var bootError = '';
+
+  function initDb() {
+    if (db || bootError) return;
+    try {
+      if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+        bootError = 'Supabase JS não carregou. Verifique a CDN no index.html.';
+        return;
+      }
+      if (!window.APP_CONFIG) {
+        bootError = 'APP_CONFIG ausente. Confirme se config.js foi carregado antes do app.js.';
+        return;
+      }
+      var url = window.APP_CONFIG.SUPABASE_URL;
+      var key = window.APP_CONFIG.SUPABASE_ANON_KEY;
+      if (!url || !key || String(url).includes('PLACEHOLDER') || String(key).includes('PLACEHOLDER')) {
+        bootError = 'Credenciais Supabase não configuradas em config.js (PLACEHOLDER detectado).';
+        return;
+      }
+      db = window.supabase.createClient(url, key);
+    } catch (e) {
+      bootError = 'Falha ao inicializar Supabase: ' + ((e && e.message) || e);
+    }
+  }
 
   function moeda(v) { return (typeof v === 'number' && !isNaN(v) ? v : Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
   function pct(v) {
@@ -16,6 +39,13 @@
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[m]; }); }
   function loading() { app.innerHTML = '<div class="loading">Carregando...</div>'; }
   function erro(e) { app.innerHTML = '<div class="error">Erro ao carregar dados: ' + esc((e && e.message) || e) + '</div>'; }
+  function assertDb() {
+    initDb();
+    if (!db) {
+      var hint = 'Dica: publique com credenciais reais no config.js ou injete secrets no workflow de deploy.';
+      throw new Error((bootError || 'Supabase não inicializado.') + ' ' + hint);
+    }
+  }
   function photo(url, cls) { return url ? '<img class="' + (cls || 'photo') + '" src="' + esc(url) + '" alt="foto" />' : '<div class="' + (cls || 'photo') + '"></div>'; }
 
   function routeInfo() {
@@ -52,6 +82,7 @@
   async function renderSetores() {
     loading();
     try {
+      assertDb();
       var rs = await db.from('v_setor_resumo').select('*');
       if (rs.error) throw rs.error;
       var rows = rs.data || [];
@@ -77,6 +108,7 @@
   async function renderSetorDetalhe(id) {
     loading();
     try {
+      assertDb();
       var setorQ = await db.from('v_setor_resumo').select('*').eq('id', id).single();
       if (setorQ.error) throw setorQ.error;
       var rel = await db.from('empreendimento_setor').select('empreendimento_id').eq('setor_id', id);
@@ -128,6 +160,7 @@
   async function renderEmpreendimentos() {
     loading();
     try {
+      assertDb();
       var q = await db.from('v_empreendimento_resumo').select('*');
       if (q.error) throw q.error;
       var emps = q.data || [];
@@ -171,6 +204,7 @@
   async function renderEmpDetalhe(id) {
     loading();
     try {
+      assertDb();
       var empQ = await db.from('v_empreendimento_resumo').select('*').eq('id', id).single();
       if (empQ.error) throw empQ.error;
       var uniQ = await db.from('v_unidade_completa').select('*').eq('empreendimento_id', id);
@@ -223,6 +257,7 @@
   async function renderUnidade(id) {
     loading();
     try {
+      assertDb();
       var unidadeQ = await db.from('v_unidade_completa').select('*').eq('id', id).single();
       if (unidadeQ.error) throw unidadeQ.error;
       var propQ = await db.from('unidade_pessoa').select('pessoa(nome_completo, cpf, telefone, email)').eq('unidade_id', id);
@@ -323,6 +358,7 @@
   async function renderMoradores() {
     loading();
     try {
+      assertDb();
       var q = await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade(id, v_unidade_completa(endereco, empreendimento_nome)))');
       if (q.error) throw q.error;
       var rows = q.data || [];
@@ -346,6 +382,7 @@
   async function renderAcoes() {
     loading();
     try {
+      assertDb();
       var q = await db.from('v_acao_completa').select('*').order('dias_restantes', { ascending: true });
       if (q.error) throw q.error;
       var rows = q.data || [];
