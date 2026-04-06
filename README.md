@@ -1,22 +1,23 @@
-# Painel Habitacional (GitHub Pages + Supabase + Sync Airtable)
+# Painel Habitacional (GitHub Pages + Supabase)
 
-Este projeto agora está preparado para:
+Este projeto foi ajustado para operar **exclusivamente com Supabase**.
 
-1. **Sincronizar Airtable -> Supabase** automaticamente.
-2. Usar o **Supabase como backend** da interface publicada no GitHub Pages.
+- ❌ Airtable removido da arquitetura.
+- ✅ Interface web no GitHub Pages lendo/escrevendo direto no Supabase.
+- ✅ Atualização automática no front-end via Supabase Realtime.
 
 ---
 
-## Arquitetura
+## Arquitetura atual
 
-- **Airtable**: fonte de dados operacional.
-- **Script Node (`scripts/sync-airtable-to-supabase.mjs`)**: importa e faz upsert no Supabase.
-- **Supabase**: banco relacional usado pelo front-end.
-- **GitHub Pages (`index.html`)**: interface para navegar/editar dados.
+`GitHub Pages (index.html + app.js) <-> Supabase (Postgres + Realtime)`
 
-Fluxo:
+A aplicação:
 
-`Airtable -> (sync script / GitHub Action) -> Supabase -> (supabase-js anon) -> Front-end`
+1. carrega dados do Supabase;
+2. permite criar/editar/excluir registros;
+3. aplica alterações no banco imediatamente;
+4. escuta eventos Realtime para refletir alterações automáticas na tela.
 
 ---
 
@@ -24,64 +25,24 @@ Fluxo:
 
 No SQL Editor do Supabase, execute `supabase/schema.sql`.
 
-Esse schema já inclui:
+O schema cria as tabelas:
 
-- tabelas da hierarquia (`setores`, `empreendimentos`, `unidades`, `transacoes`),
-- relacionamento com `proprietarios` via `unidade_proprietarios`,
-- coluna `airtable_id` para upsert estável,
-- RLS + políticas iniciais para bootstrap.
+- `setores`
+- `empreendimentos`
+- `unidades`
+- `proprietarios`
+- `unidade_proprietarios`
+- `transacoes`
 
----
+Também ativa RLS e políticas iniciais para uso no painel.
 
-## 2) Configurar sync Airtable -> Supabase
-
-### 2.1 Variáveis
-
-Copie `.env.example` para `.env` e preencha:
-
-- `AIRTABLE_TOKEN`
-- `AIRTABLE_BASE_ID`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `AIRTABLE_MAPPING_PATH` (normalmente `airtable/mapping.json`)
-
-### 2.2 Mapeamento
-
-Copie `airtable/mapping.example.json` para `airtable/mapping.json` e ajuste:
-
-- nome das tabelas no Airtable (`name`),
-- nome das colunas em cada tabela (`fields`),
-- nome dos campos de link entre tabelas (`relations`).
-
-### 2.3 Rodar sincronização manual
-
-```bash
-npm install
-npm run sync:airtable
-```
+> Importante: para produção, refine as políticas RLS de acordo com suas regras de acesso.
 
 ---
 
-## 3) Automatizar sincronização
+## 2) Configurar conexão no front-end
 
-Existe workflow em `.github/workflows/sync-airtable.yml` com:
-
-- `workflow_dispatch` (manual),
-- agendamento a cada 6h.
-
-Configure os **GitHub Secrets**:
-
-- `AIRTABLE_TOKEN`
-- `AIRTABLE_BASE_ID`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `AIRTABLE_MAPPING_JSON` (conteúdo completo do `mapping.json` em string JSON)
-
----
-
-## 4) Front-end usando Supabase
-
-No arquivo `config.js`, preencha:
+Edite `config.js` com os dados do seu projeto:
 
 ```js
 window.APP_CONFIG = {
@@ -90,65 +51,27 @@ window.APP_CONFIG = {
 };
 ```
 
-Com isso, o front passa a ler e editar diretamente no Supabase.
+Com isso, o front-end no GitHub Pages já consegue autenticar como `anon` e operar nas tabelas.
 
 ---
 
-## 5) Deploy no GitHub Pages
+## 3) Publicar no GitHub Pages
 
-1. `git push`
-2. No GitHub: **Settings -> Pages**
-3. Source: **Deploy from a branch**
-4. Escolher branch e pasta `/root`
+1. Faça `git push` na branch.
+2. No GitHub: **Settings → Pages**.
+3. Source: **Deploy from a branch**.
+4. Selecione a branch e pasta `/root`.
 
----
-
-## Informações que faltam (me envie para eu ajustar 100%)
-
-Para eu finalizar tudo exatamente com seus nomes reais do Airtable, preciso que você me passe:
-
-1. **Nome exato** das tabelas no Airtable (ex.: "Setores Habitacionais", "Empreendimentos" etc.).
-2. **Nome exato** das colunas de cada tabela.
-3. Quais colunas são **links** entre tabelas (ex.: campo que liga unidade ao empreendimento).
-4. Se existe algum campo de status com valores fixos (ex.: "Registrado", "Em análise").
-5. Se você quer sync **somente Airtable -> Supabase** ou também retorno (bidirecional).
-
-Se você me mandar um print de cada tabela com os nomes das colunas, eu te devolvo o `mapping.json` pronto.
+Após publicado, a página já abre o painel conectado ao Supabase.
 
 ---
 
-## 6) Codex + Supabase (MCP) para revisão/atualização por comando
+## 4) Informações que preciso de você para fechar 100% com sua conta
 
-Este repositório agora inclui um orquestrador para você disparar tarefas no Codex por comando e já orientar o uso do Supabase via MCP.
+Para conectar corretamente ao seu projeto Supabase, me envie:
 
-### 6.1 Configurar MCP do Supabase no Codex
+1. **SUPABASE_URL** do seu projeto.
+2. **SUPABASE_ANON_KEY** do projeto.
+3. Confirmação se quer manter acesso público (`anon`) com RLS aberto inicialmente, ou se prefere que eu restrinja políticas por usuário autenticado.
 
-1. Copie `.codex/config.toml.example` para `~/.codex/config.toml` (ou mescle com sua config atual).
-2. Rode login do provedor:
-
-```bash
-codex mcp login supabase
-```
-
-### 6.2 Disparar tarefa para o Codex executar sozinho
-
-```bash
-npm run codex:task -- --goal "Revise o app.js, proponha melhorias e aplique as correções"
-```
-
-Esse comando usa `scripts/codex-supabase-orchestrator.mjs`, que:
-
-- monta um prompt padronizado para revisão + atualização;
-- força comportamento seguro (mudanças pequenas e checks);
-- tenta invocar o Codex CLI automaticamente.
-
-### 6.3 Validar prompt sem executar
-
-```bash
-npm run codex:task -- --goal "Criar migration para novo campo" --dry-run
-```
-
-### Observação importante
-
-Mesmo com MCP, o Codex não faz alteração “sozinho em background” sem gatilho.
-Você dispara via comando (como acima) ou automatiza esse comando num scheduler/CI.
+Se quiser, eu também posso te entregar uma versão com login e permissões por usuário (Auth + RLS por `auth.uid()`).
