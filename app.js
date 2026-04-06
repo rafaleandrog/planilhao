@@ -6,6 +6,7 @@ const connEl = document.getElementById('conn-status');
 const state = {
   supabase: null,
   connected: false,
+  realtimeChannel: null,
   data: {
     setores: [],
     empreendimentos: [],
@@ -15,6 +16,8 @@ const state = {
     transacoes: []
   }
 };
+
+const tables = ['setores', 'empreendimentos', 'unidades', 'proprietarios', 'unidade_proprietarios', 'transacoes'];
 
 const demo = {
   setores: [
@@ -73,6 +76,7 @@ async function initData() {
       state.connected = true;
       connEl.textContent = 'Supabase conectado';
       connEl.classList.add('ok');
+      bindRealtime();
       return;
     } catch (err) {
       console.error(err);
@@ -85,12 +89,27 @@ async function initData() {
 }
 
 async function loadFromSupabase() {
-  const tables = ['setores', 'empreendimentos', 'unidades', 'proprietarios', 'unidade_proprietarios', 'transacoes'];
   for (const table of tables) {
     const { data, error } = await state.supabase.from(table).select('*');
     if (error) throw error;
     state.data[table] = data;
   }
+}
+
+function bindRealtime() {
+  if (!state.connected || !state.supabase) return;
+
+  if (state.realtimeChannel) {
+    state.supabase.removeChannel(state.realtimeChannel);
+  }
+
+  state.realtimeChannel = state.supabase
+    .channel('painel-habitacional-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: '*' }, async () => {
+      await loadFromSupabase();
+      render();
+    })
+    .subscribe();
 }
 
 async function save(table, row, idField = 'id') {
@@ -492,3 +511,9 @@ window.addEventListener('hashchange', render);
   if (!location.hash) location.hash = '#/';
   render();
 })();
+
+window.addEventListener('beforeunload', () => {
+  if (state.realtimeChannel && state.supabase) {
+    state.supabase.removeChannel(state.realtimeChannel);
+  }
+});
