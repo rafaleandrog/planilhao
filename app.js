@@ -42,7 +42,7 @@
   function assertDb() {
     initDb();
     if (!db) {
-      var hint = 'Dica: publique com credenciais reais no config.js ou injete secrets no workflow de deploy.';
+      var hint = 'Dica: publique com credenciais reais no config.js ou injete secrets no workflow .github/workflows/deploy.yml.';
       throw new Error((bootError || 'Supabase não inicializado.') + ' ' + hint);
     }
   }
