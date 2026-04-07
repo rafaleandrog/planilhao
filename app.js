@@ -1,5 +1,10 @@
-const { createClient } = supabase
-const db = createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY)
+let db = null
+try {
+  const { createClient } = supabase
+  db = createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY)
+} catch(e) {
+  console.error('Supabase init error:', e)
+}
 
 // HELPERS
 function moeda(v) { return v != null && !isNaN(v) ? Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) : 'R$ 0,00' }
@@ -32,6 +37,10 @@ function setActive(page) {
 window.addEventListener('hashchange', route)
 window.addEventListener('load', route)
 function route() {
+  if (!window.APP_CONFIG?.SUPABASE_URL || window.APP_CONFIG.SUPABASE_URL.includes('PLACEHOLDER')) {
+    document.getElementById('app').innerHTML = '<div style="color:red;padding:40px">Erro: credenciais do Supabase não configuradas. Verifique o config.js e o deploy workflow.</div>'
+    return
+  }
   const hash = window.location.hash.slice(1) || 'setores'
   const app = document.getElementById('app')
   app.innerHTML = '<div class="loading">Carregando...</div>'
