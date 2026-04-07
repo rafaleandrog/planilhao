@@ -160,3 +160,137 @@ function showTab(show, hide, btn) {
   btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
   btn.classList.add('active')
 }
+
+// PÁGINA 3 — TODOS OS EMPREENDIMENTOS
+async function renderEmpreendimentos() {
+  const app = document.getElementById('app')
+  const [{ data: emps }, { data: relacoes }] = await Promise.all([
+    db.from('v_empreendimento_resumo').select('*'),
+    db.from('empreendimento_setor').select('empreendimento_id, setor_id, setor_habitacional(nome)')
+  ])
+  const setorMap = {}
+  ;(relacoes||[]).forEach(r => { if (r.setor_habitacional) setorMap[r.empreendimento_id] = r.setor_habitacional.nome })
+  let busca = '', filtroSetor = 'Todos', filtroStatus = 'Todos'
+  const setores = ['Todos','Boa Vista','Contagem 1','Contagem 2','Contagem 3','Grande Colorado']
+  const statusList = ['Todos','Irregular','Em Análise','Caucionado','Aprovado','Registrado']
+  function renderCards() {
+    let lista = emps || []
+    if (busca) lista = lista.filter(e => e.nome?.toLowerCase().includes(busca.toLowerCase()) || e.sigla?.toLowerCase().includes(busca.toLowerCase()))
+    if (filtroSetor !== 'Todos') lista = lista.filter(e => setorMap[e.id] === filtroSetor)
+    if (filtroStatus !== 'Todos') lista = lista.filter(e => e.status === filtroStatus)
+    document.getElementById('emp-grid').innerHTML = lista.map(e => `
+      <div class="card" onclick="location.hash='empreendimento/${e.id}'">
+        <div style="position:relative">
+          ${img(e.foto_url, e.nome)}
+          ${setorMap[e.id] ? `<span class="badge badge-white" style="position:absolute;top:8px;left:8px">${setorMap[e.id]}</span>` : ''}
+        </div>
+        <div class="card-body">
+          <div class="card-title">${e.nome}</div>
+          <div style="text-align:center;margin-bottom:8px">${badgeStatus(e.status)}</div>
+          <div class="stat-row accent" style="justify-content:center">${moeda(e.vgv_total)}</div>
+          <div class="stat-row muted" style="justify-content:center">Unidades: ${num(e.qntd_unidades)}</div>
+          <div class="stat-row muted" style="justify-content:center">📈 Adesômetro: ${pct(e.adesometro_pct != null ? e.adesometro_pct/100 : null)}</div>
+        </div>
+      </div>`).join('') || '<p style="color:var(--text-muted)">Nenhum empreendimento encontrado.</p>'
+  }
+  app.innerHTML = `
+    <h1 class="page-title">Todos os empreendimentos</h1>
+    <div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Buscar (Nome ou Sigla)" oninput="window._buscaEmp(this.value)"></div>
+    <div class="filter-bar">${setores.map(s => `<button class="filter-btn ${filtroSetor===s?'active':''}" onclick="window._filtroSetorEmp('${s}')">${s}</button>`).join('')}</div>
+    <div class="filter-bar">${statusList.map(s => `<button class="filter-btn ${filtroStatus===s?'active':''}" onclick="window._filtroStatusEmp('${s}')">${s}</button>`).join('')}</div>
+    <div id="emp-grid" class="grid-4"></div>`
+  window._buscaEmp = (v) => { busca = v; renderCards() }
+  window._filtroSetorEmp = (v) => {
+    filtroSetor = v
+    document.querySelectorAll('.filter-bar')[0].querySelectorAll('.filter-btn').forEach((b,i) => b.classList.toggle('active', setores[i]===v))
+    renderCards()
+  }
+  window._filtroStatusEmp = (v) => {
+    filtroStatus = v
+    document.querySelectorAll('.filter-bar')[1].querySelectorAll('.filter-btn').forEach((b,i) => b.classList.toggle('active', statusList[i]===v))
+    renderCards()
+  }
+  renderCards()
+}
+
+// PÁGINA 4 — DETALHE DO EMPREENDIMENTO
+async function renderEmpreendimento(id) {
+  const app = document.getElementById('app')
+  const [{ data: e }, { data: unidades }] = await Promise.all([
+    db.from('v_empreendimento_resumo').select('*').eq('id', id).single(),
+    db.from('v_unidade_completa').select('*').eq('empreendimento_id', id)
+  ])
+  if (!e) { app.innerHTML = '<div class="error">Empreendimento não encontrado.</div>'; return }
+  let filtroLote = 'Todos'
+  const loteStatus = ['Todos','Aderente Quitado','Aderente Escriturado','Aderente Não Escriturado','Não Aderente']
+  function renderUnidades() {
+    const lista = filtroLote === 'Todos' ? (unidades||[]) : (unidades||[]).filter(u => u.status_lote === filtroLote)
+    document.getElementById('tab-unidades').innerHTML = `
+      <div class="filter-bar">${loteStatus.map(s => `<button class="filter-btn ${filtroLote===s?'active':''}" onclick="window._filtroLote('${s}')">${s}</button>`).join('')}</div>
+      <table>
+        <thead><tr><th>Endereço</th><th>Status</th><th>Valor</th><th></th></tr></thead>
+        <tbody>${lista.map(u => `
+          <tr>
+            <td>${u.endereco||'-'}</td>
+            <td>${badgeLote(u.status_lote)}</td>
+            <td>${moeda(u.preco_total_proposta_vigente)}</td>
+            <td><button class="btn btn-blue btn-sm" onclick="location.hash='unidade/${u.id}'">Ver unidade</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  }
+  window._filtroLote = (v) => { filtroLote = v; renderUnidades() }
+  app.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <div class="detail-photo">${e.foto_url ? `<img src="${e.foto_url}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '🏘'}</div>
+        <div>
+          <h1 style="font-size:22px;font-weight:700">${e.nome}</h1>
+          <div style="margin-top:8px">${badgeStatus(e.status)}</div>
+        </div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-label">Adesômetro</div><div class="metric-value">${pct(e.adesometro_pct != null ? e.adesometro_pct/100 : null)}</div></div>
+        <div class="metric-card"><div class="metric-label">Área Total Lotes (m²)</div><div class="metric-value">${num(e.area_total_lotes_m2)}</div></div>
+        <div class="metric-card"><div class="metric-label">VGV</div><div class="metric-value">${moeda(e.vgv_total)}</div></div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab2('unidades','props2','acoes2',this)">Unidades</div>
+      <div class="tab" onclick="showTab2('props2','unidades','acoes2',this)">Propostas Vigentes</div>
+      <div class="tab" onclick="showTab2('acoes2','unidades','props2',this)">Ções</div>
+    </div>
+    <div id="tab-unidades"></div>
+    <div id="tab-props2" style="display:none"><div class="loading">Carregando...</div></div>
+    <div id="tab-acoes2" style="display:none"><div class="loading">Carregando...</div></div>`
+  renderUnidades()
+  loadPropostasEmp(id)
+  loadAcoesEmp(id)
+}
+function showTab2(show, h1, h2, btn) {
+  ['tab-'+show,'tab-'+h1,'tab-'+h2].forEach((id,i) => {
+    const el = document.getElementById(id); if(el) el.style.display = i===0?'':'none'
+  })
+  btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  btn.classList.add('active')
+}
+async function loadPropostasEmp(id) {
+  const { data } = await db.from('proposta_empreendimento').select('proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo)').eq('empreendimento_id', id)
+  const el = document.getElementById('tab-props2'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Nenhuma proposta específica. Herda do Setor.</p>'; return }
+  el.innerHTML = data.map(r => r.proposta).filter(Boolean).map(p => `
+    <div class="transacao-item"><strong>${p.titulo}</strong>
+    <div style="color:var(--text-muted);font-size:13px;margin-top:6px">${dt(p.data_proposta)} → ${dt(p.data_fim_vigencia)} · ${moeda(p.preco_proposta_r_m2)}/m²</div></div>`).join('')
+}
+async function loadAcoesEmp(id) {
+  const { data } = await db.from('acao_empreendimento').select('acao_id').eq('empreendimento_id', id)
+  const el = document.getElementById('tab-acoes2'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Nenhuma ação registrada.</p>'; return }
+  const ids = data.map(r => r.acao_id)
+  const { data: acoes } = await db.from('v_acao_completa').select('*').in('id', ids)
+  el.innerHTML = `<table><thead><tr><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th></tr></thead><tbody>
+    ${(acoes||[]).map(a => `<tr class="${a.mensagem_aviso_1_mes?'urgente':a.mensagem_aviso_2_meses?'atencao':''}">
+      <td>${a.descricao||'-'}</td><td>${a.tipo||'-'}</td><td>${moeda(a.valor)}</td><td>${dt(a.data)}</td>
+      <td>${num(a.dias_restantes)} ${a.mensagem_aviso_1_mes?'⚠️':''}</td></tr>`).join('')}
+  </tbody></table>`
+}
