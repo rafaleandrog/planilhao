@@ -1,7 +1,58 @@
+const STORAGE_KEY = 'planilhao.supabase.config'
+
+function isPlaceholder(value) {
+  return !value || String(value).includes('PLACEHOLDER')
+}
+
+function getStoredConfig() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function saveConfig(config) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+  } catch (e) {
+    console.warn('Não foi possível salvar configuração local:', e)
+  }
+}
+
+function loadSupabaseConfig() {
+  const configured = window.APP_CONFIG || {}
+  const stored = getStoredConfig()
+  const urlParams = new URLSearchParams(window.location.search)
+  const fromQuery = {
+    SUPABASE_URL: urlParams.get('supabase_url') || '',
+    SUPABASE_ANON_KEY: urlParams.get('supabase_anon_key') || ''
+  }
+
+  const resolved = {
+    SUPABASE_URL: isPlaceholder(configured.SUPABASE_URL)
+      ? (fromQuery.SUPABASE_URL || stored.SUPABASE_URL || '')
+      : configured.SUPABASE_URL,
+    SUPABASE_ANON_KEY: isPlaceholder(configured.SUPABASE_ANON_KEY)
+      ? (fromQuery.SUPABASE_ANON_KEY || stored.SUPABASE_ANON_KEY || '')
+      : configured.SUPABASE_ANON_KEY
+  }
+
+  if (resolved.SUPABASE_URL && resolved.SUPABASE_ANON_KEY) {
+    saveConfig(resolved)
+  }
+
+  window.APP_CONFIG = resolved
+  return resolved
+}
+
+const runtimeConfig = loadSupabaseConfig()
 let db = null
 try {
   const { createClient } = supabase
-  db = createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY)
+  if (!isPlaceholder(runtimeConfig.SUPABASE_URL) && !isPlaceholder(runtimeConfig.SUPABASE_ANON_KEY)) {
+    db = createClient(runtimeConfig.SUPABASE_URL, runtimeConfig.SUPABASE_ANON_KEY)
+  }
 } catch(e) {
   console.error('Supabase init error:', e)
 }
@@ -37,8 +88,16 @@ function setActive(page) {
 window.addEventListener('hashchange', route)
 window.addEventListener('load', route)
 function route() {
-  if (!window.APP_CONFIG?.SUPABASE_URL || window.APP_CONFIG.SUPABASE_URL.includes('PLACEHOLDER')) {
-    document.getElementById('app').innerHTML = '<div style="color:red;padding:40px">Erro: credenciais do Supabase não configuradas. Verifique o config.js e o deploy workflow.</div>'
+  if (!window.APP_CONFIG?.SUPABASE_URL || !window.APP_CONFIG?.SUPABASE_ANON_KEY || isPlaceholder(window.APP_CONFIG.SUPABASE_URL) || isPlaceholder(window.APP_CONFIG.SUPABASE_ANON_KEY)) {
+    document.getElementById('app').innerHTML = `
+      <div style="color:#ff6b6b;padding:40px;max-width:760px">
+        <h2 style="margin-top:0">Credenciais do Supabase não configuradas</h2>
+        <p>Configure os secrets/variables <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no GitHub Actions.</p>
+        <p>Se já configurou e ainda falha, verifique em <strong>Settings → Pages</strong> se o source está em <strong>gh-pages</strong> (ou GitHub Actions), não em <strong>main/root</strong>.</p>
+        <p>Para diagnóstico imediato, informe temporariamente pela URL:</p>
+        <pre style="background:#111;padding:12px;border-radius:8px;white-space:pre-wrap">?supabase_url=https://SEU-PROJETO.supabase.co&supabase_anon_key=SUA_CHAVE_ANON</pre>
+        <p style="margin-top:10px">As credenciais informadas por query string ficam salvas no navegador para os próximos acessos.</p>
+      </div>`
     return
   }
   const hash = window.location.hash.slice(1) || 'setores'

@@ -60,11 +60,32 @@ Com isso, o front-end no GitHub Pages já consegue autenticar como `anon` e oper
 1. Faça `git push` na branch.
 2. No GitHub: **Settings → Pages**.
 3. Source: **Deploy from a branch**.
-4. Selecione a branch e pasta `/root`.
+4. Selecione a branch `gh-pages` e pasta `/ (root)` (publicada pelo workflow), **ou** selecione `GitHub Actions`.
+
+> Se estiver em `main /root`, o site publica `config.js` com placeholder e o painel não conecta.
 
 Após publicado, a página já abre o painel conectado ao Supabase.
 
 ---
+
+
+### Deploy com GitHub Actions (recomendado)
+
+O workflow `.github/workflows/deploy.yml` agora:
+
+1. valida se os secrets `SUPABASE_URL` e `SUPABASE_ANON_KEY` existem;
+2. gera uma pasta `dist/` com `config.js` preenchido;
+3. publica apenas o `dist/` no GitHub Pages.
+
+Se os secrets não estiverem configurados, o deploy falha com erro explícito (evita publicar com `PLACEHOLDER`).
+
+### Fallback rápido para diagnóstico
+
+Se precisar testar rapidamente em produção, você pode abrir a URL com query string:
+
+`?supabase_url=https://SEU-PROJETO.supabase.co&supabase_anon_key=SUA_CHAVE_ANON`
+
+O app salva essas credenciais no `localStorage` do navegador para os próximos acessos.
 
 ## 4) Informações que preciso de você para fechar 100% com sua conta
 

@@ -2,7 +2,8 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -10,13 +11,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Injetar credenciais do Supabase
+      - name: Validar credenciais do Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || vars.SUPABASE_ANON_KEY }}
         run: |
-          sed -i "s|SUPABASE_URL_PLACEHOLDER|${{ secrets.SUPABASE_URL }}|g" config.js
-          sed -i "s|SUPABASE_ANON_KEY_PLACEHOLDER|${{ secrets.SUPABASE_ANON_KEY }}|g" config.js
+          missing=""
+          [ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+          [ -z "$SUPABASE_ANON_KEY" ] && missing="$missing SUPABASE_ANON_KEY"
+          if [ -n "$missing" ]; then
+            echo "Secrets ausentes:$missing"
+            echo "Configure os secrets do repositório antes de publicar."
+            exit 1
+          fi
+
+      - name: Gerar build com credenciais
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || vars.SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p dist
+          cp -R index.html app.js styles.css config.js dist/
+          sed -i "s|SUPABASE_URL_PLACEHOLDER|$SUPABASE_URL|g" dist/config.js
+          sed -i "s|SUPABASE_ANON_KEY_PLACEHOLDER|$SUPABASE_ANON_KEY|g" dist/config.js
 
       - name: Deploy para GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          publish_dir: ./dist
