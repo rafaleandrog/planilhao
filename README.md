@@ -60,7 +60,9 @@ Com isso, o front-end no GitHub Pages já consegue autenticar como `anon` e oper
 1. Faça `git push` na branch.
 2. No GitHub: **Settings → Pages**.
 3. Source: **Deploy from a branch**.
-4. Selecione a branch e pasta `/root`.
+4. Selecione a branch `gh-pages` e pasta `/ (root)` (publicada pelo workflow), **ou** selecione `GitHub Actions`.
+
+> Se estiver em `main /root`, o site publica `config.js` com placeholder e o painel não conecta.
 
 Após publicado, a página já abre o painel conectado ao Supabase.
 
