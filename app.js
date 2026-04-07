@@ -1,410 +1,467 @@
-(function () {
-  var app = document.getElementById('app');
-  var nav = document.getElementById('main-nav');
-  var state = { setorTab: 'empreendimentos', empTab: 'unidades', unidadeTab: 'transacoes' };
+const { createClient } = supabase
+const db = createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY)
 
-  var db = null;
-  var bootError = '';
+// HELPERS
+function moeda(v) { return v != null && !isNaN(v) ? Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) : 'R$ 0,00' }
+function pct(v) { return v != null && !isNaN(v) ? (Number(v)*100).toFixed(2)+'%' : '0%' }
+function dt(v) { return v ? new Date(v).toLocaleDateString('pt-BR') : '-' }
+function num(v) { return v ?? '-' }
+function img(url, alt) {
+  if (!url) return `<div class="card-img" style="font-size:40px">🏘</div>`
+  return `<div class="card-img"><img src="${url}" alt="${alt}" onerror="this.parentElement.innerHTML='🏘'"></div>`
+}
+function badgeStatus(s) {
+  const map = { 'Registrado':'badge-green','Aprovado':'badge-blue','Caucionado':'badge-cyan','Em Análise':'badge-orange','Irregular':'badge-red' }
+  return `<span class="badge ${map[s]||'badge-gray'}">${s||'-'}</span>`
+}
+function badgeLote(s) {
+  const map = { 'Aderente Quitado':'badge-green','Aderente Escriturado':'badge-cyan','Aderente Não Escriturado':'badge-yellow','Não Aderente':'badge-red' }
+  return `<span class="badge ${map[s]||'badge-gray'}">${s||'-'}</span>`
+}
+function badgeNeg(s) {
+  const map = { 'Maioria aderente':'badge-green','Polarizado':'badge-yellow','Maioria contrária':'badge-red','Sem negociação':'badge-gray' }
+  return `<span class="badge ${map[s]||'badge-gray'}">${s||'-'}</span>`
+}
+function setActive(page) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page || (page.startsWith('setor') && el.dataset.page==='setores') || (page.startsWith('empreendimento') && el.dataset.page==='empreendimentos') || (page.startsWith('unidade') && el.dataset.page==='empreendimentos'))
+  })
+}
 
-  function initDb() {
-    if (db || bootError) return;
-    try {
-      if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
-        bootError = 'Supabase JS não carregou. Verifique a CDN no index.html.';
-        return;
-      }
-      if (!window.APP_CONFIG) {
-        bootError = 'APP_CONFIG ausente. Confirme se config.js foi carregado antes do app.js.';
-        return;
-      }
-      var url = window.APP_CONFIG.SUPABASE_URL;
-      var key = window.APP_CONFIG.SUPABASE_ANON_KEY;
-      if (!url || !key || String(url).includes('PLACEHOLDER') || String(key).includes('PLACEHOLDER')) {
-        bootError = 'Credenciais Supabase não configuradas em config.js (PLACEHOLDER detectado).';
-        return;
-      }
-      db = window.supabase.createClient(url, key);
-    } catch (e) {
-      bootError = 'Falha ao inicializar Supabase: ' + ((e && e.message) || e);
-    }
+// ROUTER
+window.addEventListener('hashchange', route)
+window.addEventListener('load', route)
+function route() {
+  const hash = window.location.hash.slice(1) || 'setores'
+  const app = document.getElementById('app')
+  app.innerHTML = '<div class="loading">Carregando...</div>'
+  if (hash === 'setores' || hash === '') { setActive('setores'); renderSetores() }
+  else if (hash === 'empreendimentos') { setActive('empreendimentos'); renderEmpreendimentos() }
+  else if (hash === 'moradores') { setActive('moradores'); renderMoradores() }
+  else if (hash === 'acoes') { setActive('acoes'); renderAcoes() }
+  else if (hash.startsWith('setor/')) { setActive('setor'); renderSetor(hash.split('/')[1]) }
+  else if (hash.startsWith('empreendimento/')) { setActive('empreendimento'); renderEmpreendimento(hash.split('/')[1]) }
+  else if (hash.startsWith('unidade/')) { setActive('unidade'); renderUnidade(hash.split('/')[1]) }
+}
+
+// PÁGINA 1 — SETORES
+async function renderSetores() {
+  const app = document.getElementById('app')
+  const { data, error } = await db.from('v_setor_resumo').select('*')
+  if (error) { app.innerHTML = `<div class="error">Erro: ${error.message}</div>`; return }
+  app.innerHTML = `
+    <h1 class="page-title">Setores Habitacionais</h1>
+    <div class="grid-3">
+      ${data.map(s => `
+        <div class="card" onclick="location.hash='setor/${s.id}'">
+          ${img(s.foto_url, s.nome)}
+          <div class="card-body">
+            <div class="card-title">${s.nome}</div>
+            <hr class="divider">
+            <div class="stat-row">🏠 Unidades: <strong>${num(s.qntd_unidades)}</strong></div>
+            <hr class="divider">
+            <div class="stat-row accent">VGV: ${moeda(s.vgv_total)}</div>
+            <div class="stat-row muted">VGV Aderentes: ${moeda(s.vgv_aderentes)}</div>
+            <div class="stat-row muted">VGV Não Aderentes: ${moeda(s.vgv_nao_aderentes)}</div>
+            <div class="stat-row green">Registrados: ${num(s.qntd_condominios_registrados)}</div>
+            <div class="stat-row blue">Aprovados: ${num(s.qntd_condominios_aprovados)}</div>
+            <div class="stat-row orange">Em análise: ${num(s.qntd_condominios_em_analise)}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`
+}
+
+// PÁGINA 2 — DETALHE DO SETOR
+async function renderSetor(id) {
+  const app = document.getElementById('app')
+  const [{ data: s, error: e1 }, { data: relacoes, error: e2 }] = await Promise.all([
+    db.from('v_setor_resumo').select('*').eq('id', id).single(),
+    db.from('empreendimento_setor').select('empreendimento_id').eq('setor_id', id)
+  ])
+  if (e1) { app.innerHTML = `<div class="error">Erro: ${e1.message}</div>`; return }
+  const empIds = (relacoes||[]).map(r => r.empreendimento_id)
+  let emps = []
+  if (empIds.length) {
+    const { data } = await db.from('v_empreendimento_resumo').select('*').in('id', empIds)
+    emps = data || []
   }
-
-  function moeda(v) { return (typeof v === 'number' && !isNaN(v) ? v : Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
-  function pct(v) {
-    var n = Number(v);
-    return n != null && !isNaN(n) ? (n * 100).toFixed(2).replace('.', ',') + '%' : '0%';
+  let filtro = 'Todos'
+  function renderTabela() {
+    const filtrados = filtro === 'Todos' ? emps : emps.filter(e => e.status === filtro)
+    return `
+      <div class="filter-bar">
+        ${['Todos','Irregular','Em Análise','Caucionado','Aprovado','Registrado'].map(f =>
+          `<button class="filter-btn ${filtro===f?'active':''}" onclick="window._setFiltroSetor('${f}')">${f}</button>`
+        ).join('')}
+      </div>
+      <table>
+        <thead><tr><th>Condomínio</th><th>Área Poligonal (m²)</th><th>Área Total Lotes (m²)</th><th>Status Negociação</th><th></th></tr></thead>
+        <tbody>
+          ${filtrados.map(e => `
+            <tr>
+              <td>${e.nome}</td>
+              <td>${num(e.area_poligonal_m2)}</td>
+              <td>${num(e.area_total_lotes_m2)}</td>
+              <td>${badgeNeg(e.status_negociacao)}</td>
+              <td><button class="btn btn-blue btn-sm" onclick="location.hash='empreendimento/${e.id}'">Ir para condomínio</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`
   }
-  function data(v) { return v ? new Date(v).toLocaleDateString('pt-BR') : '-'; }
-  function num(v) { return v == null || v === '' || isNaN(Number(v)) ? '-' : Number(v).toLocaleString('pt-BR'); }
-  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[m]; }); }
-  function loading() { app.innerHTML = '<div class="loading">Carregando...</div>'; }
-  function erro(e) { app.innerHTML = '<div class="error">Erro ao carregar dados: ' + esc((e && e.message) || e) + '</div>'; }
-  function assertDb() {
-    initDb();
-    if (!db) {
-      var hint = 'Dica: publique com credenciais reais no config.js ou injete secrets no workflow .github/workflows/deploy.yml.';
-      throw new Error((bootError || 'Supabase não inicializado.') + ' ' + hint);
-    }
+  window._setFiltroSetor = (f) => { filtro = f; document.getElementById('tab-emps').innerHTML = renderTabela() }
+  app.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <div class="detail-photo">${s.foto_url ? `<img src="${s.foto_url}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '🏘'}</div>
+        <div>
+          <h1 style="font-size:22px;font-weight:700">${s.nome}</h1>
+          <div class="badges-row" style="margin-top:8px">
+            ${emps.map(e => `<span class="badge badge-white" style="cursor:pointer" onclick="location.hash='empreendimento/${e.id}'">${e.nome}</span>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-label">Adesômetro</div><div class="metric-value">${pct(s.adesometro_pct/100)}</div></div>
+        <div class="metric-card"><div class="metric-label">Área Lotes Privativos (m²)</div><div class="metric-value">${num(s.area_lotes_privativos_m2)}</div></div>
+        <div class="metric-card"><div class="metric-label">VGV</div><div class="metric-value">${moeda(s.vgv_total)}</div></div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('emps','props',this)">Empreendimentos</div>
+      <div class="tab" onclick="showTab('props','emps',this)">Propostas Vigentes</div>
+    </div>
+    <div id="tab-emps">${renderTabela()}</div>
+    <div id="tab-props" style="display:none"><div class="loading">Carregando propostas...</div></div>`
+  loadPropostasSetor(id)
+}
+
+async function loadPropostasSetor(id) {
+  const { data } = await db.from('proposta_setor').select('proposta_id, proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo, aprovada_pela_diretoria)').eq('setor_id', id)
+  const el = document.getElementById('tab-props')
+  if (!el) return
+  if (!data || !data.length) { el.innerHTML = '<p class="loading">Nenhuma proposta encontrada.</p>'; return }
+  el.innerHTML = data.map(r => r.proposta).filter(Boolean).map(p => `
+    <div class="transacao-item">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${p.titulo}</strong>
+        <span class="badge badge-green">${p.tipo||''}</span>
+      </div>
+      <div style="margin-top:8px;color:var(--text-muted);font-size:13px">
+        ${dt(p.data_proposta)} → ${dt(p.data_fim_vigencia)} · ${moeda(p.preco_proposta_r_m2)}/m²
+      </div>
+    </div>`).join('')
+}
+
+function showTab(show, hide, btn) {
+  document.getElementById('tab-'+show).style.display = ''
+  document.getElementById('tab-'+hide).style.display = 'none'
+  btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  btn.classList.add('active')
+}
+
+// PÁGINA 3 — TODOS OS EMPREENDIMENTOS
+async function renderEmpreendimentos() {
+  const app = document.getElementById('app')
+  const [{ data: emps }, { data: relacoes }] = await Promise.all([
+    db.from('v_empreendimento_resumo').select('*'),
+    db.from('empreendimento_setor').select('empreendimento_id, setor_id, setor_habitacional(nome)')
+  ])
+  const setorMap = {}
+  ;(relacoes||[]).forEach(r => { if (r.setor_habitacional) setorMap[r.empreendimento_id] = r.setor_habitacional.nome })
+  let busca = '', filtroSetor = 'Todos', filtroStatus = 'Todos'
+  const setores = ['Todos','Boa Vista','Contagem 1','Contagem 2','Contagem 3','Grande Colorado']
+  const statusList = ['Todos','Irregular','Em Análise','Caucionado','Aprovado','Registrado']
+  function renderCards() {
+    let lista = emps || []
+    if (busca) lista = lista.filter(e => e.nome?.toLowerCase().includes(busca.toLowerCase()) || e.sigla?.toLowerCase().includes(busca.toLowerCase()))
+    if (filtroSetor !== 'Todos') lista = lista.filter(e => setorMap[e.id] === filtroSetor)
+    if (filtroStatus !== 'Todos') lista = lista.filter(e => e.status === filtroStatus)
+    document.getElementById('emp-grid').innerHTML = lista.map(e => `
+      <div class="card" onclick="location.hash='empreendimento/${e.id}'">
+        <div style="position:relative">
+          ${img(e.foto_url, e.nome)}
+          ${setorMap[e.id] ? `<span class="badge badge-white" style="position:absolute;top:8px;left:8px">${setorMap[e.id]}</span>` : ''}
+        </div>
+        <div class="card-body">
+          <div class="card-title">${e.nome}</div>
+          <div style="text-align:center;margin-bottom:8px">${badgeStatus(e.status)}</div>
+          <div class="stat-row accent" style="justify-content:center">${moeda(e.vgv_total)}</div>
+          <div class="stat-row muted" style="justify-content:center">Unidades: ${num(e.qntd_unidades)}</div>
+          <div class="stat-row muted" style="justify-content:center">📈 Adesômetro: ${pct(e.adesometro_pct != null ? e.adesometro_pct/100 : null)}</div>
+        </div>
+      </div>`).join('') || '<p style="color:var(--text-muted)">Nenhum empreendimento encontrado.</p>'
   }
-  function photo(url, cls) { return url ? '<img class="' + (cls || 'photo') + '" src="' + esc(url) + '" alt="foto" />' : '<div class="' + (cls || 'photo') + '"></div>'; }
-
-  function routeInfo() {
-    var hash = (window.location.hash || '#setores').replace(/^#/, '');
-    var parts = hash.split('/');
-    return { route: parts[0], id: parts[1] };
+  app.innerHTML = `
+    <h1 class="page-title">Todos os empreendimentos</h1>
+    <div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Buscar (Nome ou Sigla)" oninput="window._buscaEmp(this.value)"></div>
+    <div class="filter-bar">${setores.map(s => `<button class="filter-btn ${filtroSetor===s?'active':''}" onclick="window._filtroSetorEmp('${s}')">${s}</button>`).join('')}</div>
+    <div class="filter-bar">${statusList.map(s => `<button class="filter-btn ${filtroStatus===s?'active':''}" onclick="window._filtroStatusEmp('${s}')">${s}</button>`).join('')}</div>
+    <div id="emp-grid" class="grid-4"></div>`
+  window._buscaEmp = (v) => { busca = v; renderCards() }
+  window._filtroSetorEmp = (v) => {
+    filtroSetor = v
+    document.querySelectorAll('.filter-bar')[0].querySelectorAll('.filter-btn').forEach((b,i) => b.classList.toggle('active', setores[i]===v))
+    renderCards()
   }
-
-  function setActiveNav(route) {
-    if (!nav) return;
-    Array.from(nav.querySelectorAll('.nav-link')).forEach(function (el) {
-      var r = el.getAttribute('data-route');
-      el.classList.toggle('active', r === route || (route === 'setor' && r === 'setores') || (route === 'empreendimento' && r === 'empreendimentos') || (route === 'unidade' && r === 'empreendimentos'));
-    });
+  window._filtroStatusEmp = (v) => {
+    filtroStatus = v
+    document.querySelectorAll('.filter-bar')[1].querySelectorAll('.filter-btn').forEach((b,i) => b.classList.toggle('active', statusList[i]===v))
+    renderCards()
   }
+  renderCards()
+}
 
-  function classKey(v) { return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-'); }
-
-  function statusBadge(status) {
-    return '<span class="badge badge-status-' + classKey(status) + '">' + esc(status || '-') + '</span>';
+// PÁGINA 4 — DETALHE DO EMPREENDIMENTO
+async function renderEmpreendimento(id) {
+  const app = document.getElementById('app')
+  const [{ data: e }, { data: unidades }] = await Promise.all([
+    db.from('v_empreendimento_resumo').select('*').eq('id', id).single(),
+    db.from('v_unidade_completa').select('*').eq('empreendimento_id', id)
+  ])
+  if (!e) { app.innerHTML = '<div class="error">Empreendimento não encontrado.</div>'; return }
+  let filtroLote = 'Todos'
+  const loteStatus = ['Todos','Aderente Quitado','Aderente Escriturado','Aderente Não Escriturado','Não Aderente']
+  function renderUnidades() {
+    const lista = filtroLote === 'Todos' ? (unidades||[]) : (unidades||[]).filter(u => u.status_lote === filtroLote)
+    document.getElementById('tab-unidades').innerHTML = `
+      <div class="filter-bar">${loteStatus.map(s => `<button class="filter-btn ${filtroLote===s?'active':''}" onclick="window._filtroLote('${s}')">${s}</button>`).join('')}</div>
+      <table>
+        <thead><tr><th>Endereço</th><th>Status</th><th>Valor</th><th></th></tr></thead>
+        <tbody>${lista.map(u => `
+          <tr>
+            <td>${u.endereco||'-'}</td>
+            <td>${badgeLote(u.status_lote)}</td>
+            <td>${moeda(u.preco_total_proposta_vigente)}</td>
+            <td><button class="btn btn-blue btn-sm" onclick="location.hash='unidade/${u.id}'">Ver unidade</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
   }
+  window._filtroLote = (v) => { filtroLote = v; renderUnidades() }
+  app.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <div class="detail-photo">${e.foto_url ? `<img src="${e.foto_url}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '🏘'}</div>
+        <div>
+          <h1 style="font-size:22px;font-weight:700">${e.nome}</h1>
+          <div style="margin-top:8px">${badgeStatus(e.status)}</div>
+        </div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-label">Adesômetro</div><div class="metric-value">${pct(e.adesometro_pct != null ? e.adesometro_pct/100 : null)}</div></div>
+        <div class="metric-card"><div class="metric-label">Área Total Lotes (m²)</div><div class="metric-value">${num(e.area_total_lotes_m2)}</div></div>
+        <div class="metric-card"><div class="metric-label">VGV</div><div class="metric-value">${moeda(e.vgv_total)}</div></div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab2('unidades','props2','acoes2',this)">Unidades</div>
+      <div class="tab" onclick="showTab2('props2','unidades','acoes2',this)">Propostas Vigentes</div>
+      <div class="tab" onclick="showTab2('acoes2','unidades','props2',this)">Ções</div>
+    </div>
+    <div id="tab-unidades"></div>
+    <div id="tab-props2" style="display:none"><div class="loading">Carregando...</div></div>
+    <div id="tab-acoes2" style="display:none"><div class="loading">Carregando...</div></div>`
+  renderUnidades()
+  loadPropostasEmp(id)
+  loadAcoesEmp(id)
+}
+function showTab2(show, h1, h2, btn) {
+  ['tab-'+show,'tab-'+h1,'tab-'+h2].forEach((id,i) => {
+    const el = document.getElementById(id); if(el) el.style.display = i===0?'':'none'
+  })
+  btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  btn.classList.add('active')
+}
+async function loadPropostasEmp(id) {
+  const { data } = await db.from('proposta_empreendimento').select('proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo)').eq('empreendimento_id', id)
+  const el = document.getElementById('tab-props2'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Nenhuma proposta específica. Herda do Setor.</p>'; return }
+  el.innerHTML = data.map(r => r.proposta).filter(Boolean).map(p => `
+    <div class="transacao-item"><strong>${p.titulo}</strong>
+    <div style="color:var(--text-muted);font-size:13px;margin-top:6px">${dt(p.data_proposta)} → ${dt(p.data_fim_vigencia)} · ${moeda(p.preco_proposta_r_m2)}/m²</div></div>`).join('')
+}
+async function loadAcoesEmp(id) {
+  const { data } = await db.from('acao_empreendimento').select('acao_id').eq('empreendimento_id', id)
+  const el = document.getElementById('tab-acoes2'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Nenhuma ação registrada.</p>'; return }
+  const ids = data.map(r => r.acao_id)
+  const { data: acoes } = await db.from('v_acao_completa').select('*').in('id', ids)
+  el.innerHTML = `<table><thead><tr><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th></tr></thead><tbody>
+    ${(acoes||[]).map(a => `<tr class="${a.mensagem_aviso_1_mes?'urgente':a.mensagem_aviso_2_meses?'atencao':''}">
+      <td>${a.descricao||'-'}</td><td>${a.tipo||'-'}</td><td>${moeda(a.valor)}</td><td>${dt(a.data)}</td>
+      <td>${num(a.dias_restantes)} ${a.mensagem_aviso_1_mes?'⚠️':''}</td></tr>`).join('')}
+  </tbody></table>`
+}
 
-  function statusNegBadge(v) {
-    var map = { 'Maioria aderente': 'text-green', Polarizado: 'text-yellow', 'Maioria contrária': 'text-red', 'Sem negociação': 'text-muted' };
-    return '<span class="badge ' + (map[v] || 'text-muted') + '">' + esc(v || 'Sem negociação') + '</span>';
+// PÁGINA 5 — DETALHE DA UNIDADE
+async function renderUnidade(id) {
+  const app = document.getElementById('app')
+  const [{ data: u }, { data: props }, { data: trans }] = await Promise.all([
+    db.from('v_unidade_completa').select('*').eq('id', id).single(),
+    db.from('unidade_pessoa').select('pessoa(nome_completo, cpf, telefone, email)').eq('unidade_id', id),
+    db.from('transacao').select('*, transacao_signatario(pessoa(nome_completo))').eq('unidade_id', id).order('data_assinatura', {ascending: false})
+  ])
+  if (!u) { app.innerHTML = '<div class="error">Unidade não encontrada.</div>'; return }
+  const proprietario = props?.[0]?.pessoa?.nome_completo || '-'
+  function calcExpiracao(t) {
+    if (!t.data_assinatura || !t.vigencia_meses) return '-'
+    const d = new Date(t.data_assinatura); d.setMonth(d.getMonth() + t.vigencia_meses)
+    return d.toLocaleDateString('pt-BR')
   }
-
-  function statusLoteBadge(v) { return '<span class="badge status-lote-' + classKey(v) + '">' + esc(v || '-') + '</span>'; }
-
-  function bind(selector, eventName, fn) {
-    Array.from(document.querySelectorAll(selector)).forEach(function (el) { el.addEventListener(eventName, fn); });
+  function signatario(t) {
+    const s = t.transacao_signatario?.[0]?.pessoa?.nome_completo
+    return s || '-'
   }
-
-  async function renderSetores() {
-    loading();
-    try {
-      assertDb();
-      var rs = await db.from('v_setor_resumo').select('*');
-      if (rs.error) throw rs.error;
-      var rows = rs.data || [];
-      app.innerHTML = '<div class="page-header"><h1 class="page-title">Setores Habitacionais</h1></div>' +
-        '<div class="grid-3">' + rows.map(function (s) {
-          return '<div class="card clickable setor-card" data-id="' + s.id + '">' +
-            photo(s.foto_url) +
-            '<h3 class="card-title-center">' + esc(s.nome) + '</h3>' +
-            '<div class="sep"></div><p style="text-align:center; font-weight:700;">🏠 Unidades: ' + num(s.qntd_unidades) + '</p><div class="sep"></div>' +
-            '<div class="metric-list">' +
-            '<p class="text-accent">VGV: ' + moeda(s.vgv_total) + '</p>' +
-            '<p class="text-muted">VGV Aderentes: ' + moeda(s.vgv_aderentes) + '</p>' +
-            '<p class="text-muted">VGV Não Aderentes: ' + moeda(s.vgv_nao_aderentes) + '</p>' +
-            '<p class="text-green">Registrados: ' + num(s.qntd_condominios_registrados) + '</p>' +
-            '<p class="text-blue">Aprovados: ' + num(s.qntd_condominios_aprovados) + '</p>' +
-            '<p class="text-orange">Em análise: ' + num(s.qntd_condominios_em_analise) + '</p>' +
-            '</div></div>';
-        }).join('') + '</div>';
-      bind('.setor-card', 'click', function (e) { window.location.hash = '#setor/' + e.currentTarget.getAttribute('data-id'); });
-    } catch (e) { erro(e); }
+  app.innerHTML = `
+    <div class="detail-header">
+      <h1 style="font-size:22px;font-weight:700;margin-bottom:8px">${u.endereco||'-'}</h1>
+      <div class="badges-row">
+        <span class="badge badge-white">${u.empreendimento_nome||'-'}</span>
+        ${badgeLote(u.status_lote)}
+      </div>
+      <div style="margin:8px 0;font-size:15px;font-weight:600">${proprietario}</div>
+      ${!u.quitado && u.preco_total_proposta_vigente ? `<div style="margin-bottom:12px">Valor da unidade: <strong>${moeda(u.preco_total_proposta_vigente)}</strong></div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0">
+        <div class="metric-card"><div class="metric-label">Área (m²)</div><div class="metric-value">${num(u.area_m2)}</div></div>
+        <div class="metric-card"><div class="metric-label">Matrícula</div><div class="metric-value">${num(u.matricula)}</div></div>
+        <div class="metric-card"><div class="metric-label">Uso</div><div class="metric-value"><span class="badge badge-blue">${u.uso||'-'}</span></div></div>
+        <div class="metric-card"><div class="metric-label">Tipo Lote</div><div class="metric-value">${u.tipo_lote||'-'}</div></div>
+      </div>
+      ${!u.quitado ? `<button class="btn btn-green" onclick="window._marcarQuitado('${id}')">&#10003; Marcar como quitado</button>` : ''}
+    </div>
+    <div class="price-table">
+      <div class="price-col"><label>Preço Proposta Vigente (R\$/m²)</label><span>${moeda(u.preco_proposta_r_m2)}</span></div>
+      <div class="price-col"><label>Preço Estático (R\$/m²)</label><span>${trans?.[0]?.preco_estatico_r_m2 ? moeda(trans[0].preco_estatico_r_m2) : '-'}</span></div>
+      <div class="price-col"><label>Preço Final (R\$/m²)</label><span>${trans?.[0]?.preco_base_input_r_m2 ? moeda(trans[0].preco_base_input_r_m2) : '-'}</span></div>
+    </div>
+    <div style="margin:12px 0 20px">
+      <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Assinatura Pré-Contrato:</span> ${dt(u.data_assinatura_pre_contrato)}</div>
+      <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Assinatura CP:</span> ${dt(u.data_assinatura_cp)}</div>
+      <div><span style="color:var(--text-muted)">Assinatura Escritura:</span> ${dt(u.data_assinatura_escritura)}</div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab3('trans','pvigs','uacoes',this)">Transações</div>
+      <div class="tab" onclick="showTab3('pvigs','trans','uacoes',this)">Propostas Vigentes</div>
+      <div class="tab" onclick="showTab3('uacoes','trans','pvigs',this)">Ções</div>
+    </div>
+    <div id="tab-trans">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-blue" onclick="window._abrirModal('${id}')">&#65291; Criar nova transação</button>
+      </div>
+      ${(trans||[]).map(t => `
+        <div class="transacao-item">
+          <div class="transacao-header">
+            <div class="transacao-title">${t.tipo||''} entre ${u.empreendimento_sigla||''} ${u.numero||''} e ${signatario(t)}</div>
+            <div class="transacao-price">${moeda(t.preco_base_input_r_m2)}/m²</div>
+          </div>
+          <div class="transacao-meta">
+            <div class="transacao-meta-item"><label>Data Assinatura</label><span>${dt(t.data_assinatura)}</span></div>
+            <div class="transacao-meta-item"><label>Data Expiração</label><span>${calcExpiracao(t)}</span></div>
+            <div class="transacao-meta-item"><label>Data Rescisão</label><span>${dt(t.data_rescisao)}</span></div>
+            <div class="transacao-meta-item"><label>Código Minuta</label><span>${t.codigo_minuta_contrato||'-'}</span></div>
+          </div>
+        </div>`).join('') || '<p style="color:var(--text-muted)">Nenhuma transação registrada.</p>'}
+    </div>
+    <div id="tab-pvigs" style="display:none"><div class="loading">Carregando...</div></div>
+    <div id="tab-uacoes" style="display:none"><p style="color:var(--text-muted)">Ções da unidade.</p></div>
+    <div id="modal-trans" style="display:none">
+      <div class="modal-overlay">
+        <div class="modal">
+          <h3>Nova Transação</h3>
+          <div class="form-group"><label>Tipo</label><select id="t-tipo"><option>Pré-Contrato Regularização</option><option>CP</option><option>Escritura</option><option>Cessão</option><option>Simulação</option></select></div>
+          <div class="form-group"><label>Forma de Pagamento</label><select id="t-forma"><option>Á Vista</option><option>6x</option><option>12x</option><option>Outras Parcelas</option></select></div>
+          <div class="form-group"><label>Data de Assinatura</label><input type="date" id="t-data"></div>
+          <div class="form-group"><label>Vigência (meses)</label><input type="number" id="t-vig" placeholder="0"></div>
+          <div class="form-group"><label>Sinal (R\$)</label><input type="number" id="t-sinal" placeholder="0.00"></div>
+          <div class="form-group"><label>Parcelas digitado</label><input type="number" id="t-parc" placeholder="0"></div>
+          <div class="form-group"><label>Índice Correção</label><select id="t-indice"><option>IPCA</option><option>IGPM</option><option>INCC</option><option>Sem Índice</option></select></div>
+          <div class="modal-footer">
+            <button class="btn-cancel" onclick="document.getElementById('modal-trans').style.display='none'">Cancelar</button>
+            <button class="btn btn-blue" onclick="window._salvarTransacao('${id}')">Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>`
+  window._marcarQuitado = async (uid) => {
+    if (!confirm('Marcar esta unidade como quitada?')) return
+    await db.from('unidade').update({ quitado: true }).eq('id', uid)
+    renderUnidade(uid)
   }
-
-  async function renderSetorDetalhe(id) {
-    loading();
-    try {
-      assertDb();
-      var setorQ = await db.from('v_setor_resumo').select('*').eq('id', id).single();
-      if (setorQ.error) throw setorQ.error;
-      var rel = await db.from('empreendimento_setor').select('empreendimento_id').eq('setor_id', id);
-      if (rel.error) throw rel.error;
-      var ids = (rel.data || []).map(function (r) { return r.empreendimento_id; });
-      var emps = { data: [] };
-      if (ids.length) {
-        emps = await db.from('v_empreendimento_resumo').select('*').in('id', ids);
-        if (emps.error) throw emps.error;
-      }
-      var propostas = await db.from('proposta_setor').select('proposta_id, proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo, aprovada_pela_diretoria)').eq('setor_id', id);
-      if (propostas.error) throw propostas.error;
-      var setor = setorQ.data;
-      var allEmp = emps.data || [];
-      var html = '<div class="hero">' + photo(setor.foto_url, 'photo-small') + '<div><h1 style="margin:0 0 6px">' + esc(setor.nome) + '</h1></div></div>' +
-        '<div class="badges-row">' + allEmp.map(function (e) { return '<span class="badge clickable emp-jump" data-id="' + e.id + '">' + esc(e.nome) + '</span>'; }).join('') + '</div>' +
-        '<div class="metrics"><div class="metric-item"><h4>Adesômetro</h4><p>' + pct(setor.adesometro_pct) + '</p></div>' +
-        '<div class="metric-item"><h4>Área</h4><p>' + num(setor.area_lotes_privativos_m2) + ' m²</p></div>' +
-        '<div class="metric-item"><h4>VGV</h4><p>' + moeda(setor.vgv_total) + '</p></div></div>' +
-        '<div class="tabs"><button class="tab-btn ' + (state.setorTab === 'empreendimentos' ? 'active' : '') + '" data-tab="empreendimentos">Empreendimentos</button><button class="tab-btn ' + (state.setorTab === 'propostas' ? 'active' : '') + '" data-tab="propostas">Propostas Vigentes</button></div><div id="setor-tab"></div>';
-      app.innerHTML = html;
-
-      function drawSetorTab() {
-        var c = document.getElementById('setor-tab');
-        if (state.setorTab === 'propostas') {
-          c.innerHTML = '<div class="card">' + (propostas.data || []).map(function (x) {
-            var p = x.proposta || {};
-            return '<div style="padding:8px 0"><strong>' + esc(p.titulo) + '</strong><div class="text-muted">Período: ' + data(p.data_proposta) + ' até ' + data(p.data_fim_vigencia) + ' | Preço: ' + moeda(p.preco_proposta_r_m2) + ' /m² | Tipo: ' + esc(p.tipo || '-') + '</div></div>';
-          }).join('<div class="sep"></div>') + '</div>';
-          return;
-        }
-        var currentFilter = 'Todos';
-        var filtros = ['Todos', 'Irregular', 'Em Análise', 'Caucionado', 'Aprovado', 'Registrado'];
-        c.innerHTML = '<div class="filters">' + filtros.map(function (f) { return '<button class="btn setor-filter ' + (f === 'Todos' ? 'active' : '') + '" data-f="' + f + '">' + f + '</button>'; }).join('') + '</div><div class="table-wrap"><table><thead><tr><th>Condomínio</th><th>Área Poligonal (m²)</th><th>Área Total Lotes (m²)</th><th>Status Negociação</th><th></th></tr></thead><tbody id="setor-tb"></tbody></table></div>';
-        function drawRows() {
-          var rows = allEmp.filter(function (r) { return currentFilter === 'Todos' ? true : r.status === currentFilter; });
-          document.getElementById('setor-tb').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r.nome) + '</td><td>' + num(r.area_poligonal_m2) + '</td><td>' + num(r.area_total_lotes_m2) + '</td><td>' + statusNegBadge(r.status_negociacao) + '</td><td><button class="btn ir-emp" data-id="' + r.id + '">Ir para condomínio</button></td></tr>'; }).join('') || '<tr><td colspan="5">Sem resultados.</td></tr>';
-          bind('.ir-emp', 'click', function (e) { window.location.hash = '#empreendimento/' + e.currentTarget.getAttribute('data-id'); });
-        }
-        drawRows();
-        bind('.setor-filter', 'click', function (e) { currentFilter = e.currentTarget.getAttribute('data-f'); document.querySelectorAll('.setor-filter').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); drawRows(); });
-      }
-      drawSetorTab();
-      bind('.tab-btn', 'click', function (e) { state.setorTab = e.currentTarget.getAttribute('data-tab'); document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); drawSetorTab(); });
-      bind('.emp-jump', 'click', function (e) { window.location.hash = '#empreendimento/' + e.currentTarget.getAttribute('data-id'); });
-    } catch (e) { erro(e); }
+  window._abrirModal = () => { document.getElementById('modal-trans').style.display = '' }
+  window._salvarTransacao = async (uid) => {
+    const { data: pid } = await db.rpc('get_proposta_vigente_unidade', { p_unidade_id: uid })
+    const { error } = await db.from('transacao').insert({
+      unidade_id: uid, proposta_id: pid,
+      tipo: document.getElementById('t-tipo').value,
+      forma_pagamento: document.getElementById('t-forma').value,
+      data_assinatura: document.getElementById('t-data').value || null,
+      vigencia_meses: parseInt(document.getElementById('t-vig').value) || null,
+      sinal: parseFloat(document.getElementById('t-sinal').value) || null,
+      parcelas_digitado_meses: parseInt(document.getElementById('t-parc').value) || null,
+      indice_correcao: document.getElementById('t-indice').value
+    })
+    if (error) { alert('Erro: ' + error.message); return }
+    document.getElementById('modal-trans').style.display = 'none'
+    renderUnidade(uid)
   }
+  loadPropostasUnidade(id)
+}
+function showTab3(show, h1, h2, btn) {
+  ['tab-'+show,'tab-'+h1,'tab-'+h2].forEach((id,i) => {
+    const el = document.getElementById(id); if(el) el.style.display = i===0?'':'none'
+  })
+  btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  btn.classList.add('active')
+}
+async function loadPropostasUnidade(id) {
+  const { data } = await db.from('proposta_unidade').select('proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo)').eq('unidade_id', id)
+  const el = document.getElementById('tab-pvigs'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Herda proposta do Empreendimento ou Setor.</p>'; return }
+  el.innerHTML = data.map(r => r.proposta).filter(Boolean).map(p => `
+    <div class="transacao-item"><strong>${p.titulo}</strong>
+    <div style="color:var(--text-muted);font-size:13px;margin-top:6px">${dt(p.data_proposta)} → ${dt(p.data_fim_vigencia)} · ${moeda(p.preco_proposta_r_m2)}/m²</div></div>`).join('')
+}
 
-  async function renderEmpreendimentos() {
-    loading();
-    try {
-      assertDb();
-      var q = await db.from('v_empreendimento_resumo').select('*');
-      if (q.error) throw q.error;
-      var emps = q.data || [];
-      var rel = await db.from('empreendimento_setor').select('empreendimento_id, setor_id, setor_habitacional(nome)').in('empreendimento_id', emps.map(function (e) { return e.id; }));
-      if (rel.error) throw rel.error;
-      var setorByEmp = {};
-      (rel.data || []).forEach(function (r) { setorByEmp[r.empreendimento_id] = (r.setor_habitacional && r.setor_habitacional.nome) || 'Sem Setor'; });
-      var setoresFixos = ['Todos', 'Boa Vista', 'Contagem 1', 'Contagem 2', 'Contagem 3', 'Grande Colorado'];
-      var filtroSetor = 'Todos', filtroStatus = 'Todos', busca = '';
-      app.innerHTML = '<div class="page-header"><h1 class="page-title">Todos os empreendimentos</h1></div>' +
-        '<div class="toolbar"><input id="emp-search" class="input" placeholder="🔍 Buscar por nome ou sigla" /></div>' +
-        '<div class="filters" id="f-setor">Setor: ' + setoresFixos.map(function (s) { return '<button class="btn fset ' + (s === 'Todos' ? 'active' : '') + '" data-v="' + esc(s) + '">' + s + '</button>'; }).join('') + '</div>' +
-        '<div class="filters" id="f-status">Status: ' + ['Todos', 'Irregular', 'Em Análise', 'Caucionado', 'Aprovado', 'Registrado'].map(function (s) { return '<button class="btn fsta ' + (s === 'Todos' ? 'active' : '') + '" data-v="' + esc(s) + '">' + s + '</button>'; }).join('') + '</div>' +
-        '<div class="grid-4" id="emp-grid"></div>';
-      function draw() {
-        var rows = emps.filter(function (r) {
-          var setorNome = setorByEmp[r.id] || 'Sem Setor';
-          var okBusca = !busca || (String(r.nome || '').toLowerCase().includes(busca) || String(r.sigla || '').toLowerCase().includes(busca));
-          var okSetor = filtroSetor === 'Todos' || setorNome === filtroSetor;
-          var okStatus = filtroStatus === 'Todos' || r.status === filtroStatus;
-          return okBusca && okSetor && okStatus;
-        });
-        document.getElementById('emp-grid').innerHTML = rows.map(function (r) {
-          return '<div class="card clickable emp-card" data-id="' + r.id + '">' +
-            '<div style="display:flex; justify-content:space-between; margin-bottom:6px;"><span class="badge badge-white">' + esc(setorByEmp[r.id] || 'Sem Setor') + '</span></div>' +
-            photo(r.foto_url) +
-            '<h3 style="margin:12px 0 6px">' + esc(r.nome) + '</h3>' + statusBadge(r.status) +
-            '<p class="text-accent" style="font-size:24px; margin:10px 0;">' + moeda(r.vgv_total) + '</p>' +
-            '<p>Unidades: ' + num(r.qntd_unidades) + '</p><p>📈 Adesômetro: ' + pct(r.adesometro_pct) + '</p>' +
-            '</div>';
-        }).join('') || '<div class="card">Sem resultados.</div>';
-        bind('.emp-card', 'click', function (e) { window.location.hash = '#empreendimento/' + e.currentTarget.getAttribute('data-id'); });
-      }
-      draw();
-      document.getElementById('emp-search').addEventListener('input', function (e) { busca = e.target.value.trim().toLowerCase(); draw(); });
-      bind('.fset', 'click', function (e) { filtroSetor = e.currentTarget.getAttribute('data-v'); document.querySelectorAll('.fset').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); draw(); });
-      bind('.fsta', 'click', function (e) { filtroStatus = e.currentTarget.getAttribute('data-v'); document.querySelectorAll('.fsta').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); draw(); });
-    } catch (e) { erro(e); }
+// PÁGINA 6 — MORADORES
+async function renderMoradores() {
+  const app = document.getElementById('app')
+  app.innerHTML = '<h1 class="page-title">Moradores</h1><div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Buscar por nome ou CPF" oninput="window._buscaMorador(this.value)"></div><div id="morador-lista"><div class="loading">Carregando...</div></div>'
+  const { data, error } = await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade_id, unidade(id))')
+  if (error) { document.getElementById('morador-lista').innerHTML = `<div class="error">${error.message}</div>`; return }
+  let todos = data || []
+  function render(lista) {
+    document.getElementById('morador-lista').innerHTML = `<table>
+      <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Email</th><th>Unidade(s)</th></tr></thead>
+      <tbody>${lista.map(p => `<tr>
+        <td>${p.nome_completo||'-'}</td><td>${p.cpf||'-'}</td>
+        <td>${p.telefone||'-'}</td><td>${p.email||'-'}</td>
+        <td>${(p.unidade_pessoa||[]).map(u => `<a href="#unidade/${u.unidade_id}" style="color:var(--blue);margin-right:6px">Ver unidade</a>`).join('') || '-'}</td>
+      </tr>`).join('')}</tbody></table>`
   }
-
-  async function renderEmpDetalhe(id) {
-    loading();
-    try {
-      assertDb();
-      var empQ = await db.from('v_empreendimento_resumo').select('*').eq('id', id).single();
-      if (empQ.error) throw empQ.error;
-      var uniQ = await db.from('v_unidade_completa').select('*').eq('empreendimento_id', id);
-      if (uniQ.error) throw uniQ.error;
-      var propQ = await db.from('proposta_empreendimento').select('proposta_id, proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo)').eq('empreendimento_id', id);
-      if (propQ.error) throw propQ.error;
-      var acaoQ = await db.from('acao_empreendimento').select('acao_id, v_acao_completa(*)').eq('empreendimento_id', id);
-      if (acaoQ.error) throw acaoQ.error;
-      var emp = empQ.data;
-      var unidades = uniQ.data || [];
-      app.innerHTML = '<div class="page-header"><div><h1 style="margin:0">' + esc(emp.nome) + '</h1>' + statusBadge(emp.status) + '</div></div>' +
-        '<div class="metrics"><div class="metric-item"><h4>Adesômetro</h4><p>' + pct(emp.adesometro_pct) + '</p></div><div class="metric-item"><h4>Área Total Lotes</h4><p>' + num(emp.area_total_lotes_m2) + ' m²</p></div><div class="metric-item"><h4>VGV</h4><p>' + moeda(emp.vgv_total) + '</p></div></div>' +
-        '<div class="tabs"><button class="tab-btn ' + (state.empTab === 'unidades' ? 'active' : '') + '" data-tab="unidades">Unidades</button><button class="tab-btn ' + (state.empTab === 'propostas' ? 'active' : '') + '" data-tab="propostas">Propostas Vigentes</button><button class="tab-btn ' + (state.empTab === 'acoes' ? 'active' : '') + '" data-tab="acoes">Ações</button></div><div id="emp-tab"></div>';
-
-      function draw() {
-        var c = document.getElementById('emp-tab');
-        if (state.empTab === 'propostas') {
-          c.innerHTML = '<div class="card">' + (propQ.data || []).map(function (x) { var p = x.proposta || {}; return '<div><strong>' + esc(p.titulo) + '</strong><div class="text-muted">' + data(p.data_proposta) + ' até ' + data(p.data_fim_vigencia) + ' • ' + moeda(p.preco_proposta_r_m2) + '/m² • ' + esc(p.tipo || '-') + '</div></div>'; }).join('<div class="sep"></div>') + '</div>';
-          return;
-        }
-        if (state.empTab === 'acoes') {
-          c.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Processo</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th><th>Aviso</th></tr></thead><tbody>' + (acaoQ.data || []).map(function (x) {
-            var a = x.v_acao_completa || {};
-            return '<tr class="' + (a.mensagem_aviso_1_mes ? 'row-alert-1m' : '') + '"><td>' + esc(a.descricao) + '</td><td>' + esc(a.no_processo || '-') + '</td><td>' + esc(a.tipo || '-') + '</td><td>' + moeda(a.valor) + '</td><td>' + data(a.data) + '</td><td>' + num(a.dias_restantes) + '</td><td class="text-red">' + esc(a.mensagem_aviso_1_mes || a.mensagem_aviso_2_meses || '-') + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
-          return;
-        }
-        var filtro = 'Todos';
-        c.innerHTML = '<div class="filters">' + ['Todos', 'Aderente Quitado', 'Aderente Escriturado', 'Aderente Não Escriturado', 'Não Aderente'].map(function (f) { return '<button class="btn ufil ' + (f === 'Todos' ? 'active' : '') + '" data-v="' + esc(f) + '">' + f + '</button>'; }).join('') + '</div><div class="table-wrap"><table><thead><tr><th>Endereço</th><th>Status</th><th>Proprietário</th><th>Valor (area × preco)</th><th></th></tr></thead><tbody id="tb-un"></tbody></table></div>';
-        function drawUnits() {
-          var rows = unidades.filter(function (u) { return filtro === 'Todos' || u.status_lote === filtro; });
-          document.getElementById('tb-un').innerHTML = rows.map(function (u) {
-            return '<tr><td>' + esc(u.endereco) + '</td><td>' + statusLoteBadge(u.status_lote) + '</td><td>' + esc(u.ultima_vez_modificado_por || '-') + '</td><td>' + moeda((Number(u.area_m2) || 0) * (Number(u.preco_proposta_r_m2) || 0)) + '</td><td><button class="btn ver-uni" data-id="' + u.id + '">Ver unidade</button></td></tr>';
-          }).join('') || '<tr><td colspan="5">Sem unidades.</td></tr>';
-          bind('.ver-uni', 'click', function (e) { window.location.hash = '#unidade/' + e.currentTarget.getAttribute('data-id'); });
-        }
-        drawUnits();
-        bind('.ufil', 'click', function (e) { filtro = e.currentTarget.getAttribute('data-v'); document.querySelectorAll('.ufil').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); drawUnits(); });
-      }
-      draw();
-      bind('.tab-btn', 'click', function (e) { state.empTab = e.currentTarget.getAttribute('data-tab'); document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); draw(); });
-    } catch (e) { erro(e); }
+  window._buscaMorador = (v) => {
+    const q = v.toLowerCase()
+    render(todos.filter(p => p.nome_completo?.toLowerCase().includes(q) || p.cpf?.includes(q)))
   }
+  render(todos)
+}
 
-  function descontoForma(forma) {
-    var map = { 'Á Vista': 0.9, '6x': 0.95, '12x': 1, 'Outras Parcelas': 1.05 };
-    return map[forma] || 1;
-  }
-
-  async function renderUnidade(id) {
-    loading();
-    try {
-      assertDb();
-      var unidadeQ = await db.from('v_unidade_completa').select('*').eq('id', id).single();
-      if (unidadeQ.error) throw unidadeQ.error;
-      var propQ = await db.from('unidade_pessoa').select('pessoa(nome_completo, cpf, telefone, email)').eq('unidade_id', id);
-      if (propQ.error) throw propQ.error;
-      var trQ = await db.from('transacao').select('*, transacao_signatario(pessoa(nome_completo))').eq('unidade_id', id).order('data_assinatura', { ascending: false });
-      if (trQ.error) throw trQ.error;
-      var acaoQ = await db.from('acao_empreendimento').select('acao_id, v_acao_completa(*)').eq('empreendimento_id', unidadeQ.data.empreendimento_id);
-      if (acaoQ.error) throw acaoQ.error;
-      var propostasQ = await db.rpc('get_proposta_vigente_unidade', { p_unidade_id: Number(id) });
-      if (propostasQ.error) throw propostasQ.error;
-
-      var u = unidadeQ.data;
-      var donos = (propQ.data || []).map(function (p) { return p.pessoa; }).filter(Boolean);
-      var trans = trQ.data || [];
-      var latest = trans[0] || {};
-      var precoFinal = (Number(latest.preco_base_r_m2) || Number(u.preco_proposta_r_m2) || 0) * descontoForma(latest.forma_pagamento);
-
-      app.innerHTML = '<h1 style="margin:0 0 8px">' + esc(u.endereco) + '</h1>' +
-        '<div class="badge badge-white">' + esc(u.empreendimento_nome) + '</div>' +
-        '<p><strong>' + esc((donos[0] && donos[0].nome_completo) || '-') + '</strong></p>' + statusLoteBadge(u.status_lote) +
-        (!u.quitado ? '<p style="font-size:26px; font-weight:800;">Valor da unidade: ' + moeda((Number(u.area_m2) || 0) * (Number(u.preco_proposta_r_m2) || 0)) + '</p>' : '') +
-        '<div class="metrics metrics-4"><div class="metric-item"><h4>Área (m²)</h4><p>' + num(u.area_m2) + '</p></div><div class="metric-item"><h4>Matrícula</h4><p>' + esc(u.matricula || '-') + '</p></div><div class="metric-item"><h4>Uso</h4><p><span class="badge">' + esc(u.uso || '-') + '</span></p></div><div class="metric-item"><h4>Tipo Lote</h4><p>' + esc(u.tipo_lote || '-') + '</p></div></div>' +
-        (!u.quitado ? '<button class="btn btn-success" id="btn-quitado">✓ Marcar como quitado</button>' : '') +
-        '<div class="pricing-grid"><div><strong>Preço Proposta Vigente</strong><div>' + moeda(u.preco_proposta_r_m2) + '</div></div><div><strong>Preço Estático</strong><div>' + moeda(u.preco_total_proposta_vigente) + '</div></div><div><strong>Preço Final</strong><div>' + moeda(precoFinal) + '</div></div></div>' +
-        '<div class="vertical-list"><div>Assinatura Pré-Contrato: ' + data(u.data_assinatura_pre_contrato) + '</div><div>Assinatura CP: ' + data(u.data_assinatura_cp) + '</div><div>Assinatura Escritura: ' + data(u.data_assinatura_escritura) + '</div></div>' +
-        '<div class="tabs"><button class="tab-btn ' + (state.unidadeTab === 'transacoes' ? 'active' : '') + '" data-tab="transacoes">Transações</button><button class="tab-btn ' + (state.unidadeTab === 'propostas' ? 'active' : '') + '" data-tab="propostas">Propostas Vigentes</button><button class="tab-btn ' + (state.unidadeTab === 'acoes' ? 'active' : '') + '" data-tab="acoes">Ações</button></div><div id="uni-tab"></div>';
-
-      function draw() {
-        var c = document.getElementById('uni-tab');
-        if (state.unidadeTab === 'propostas') {
-          var arr = Array.isArray(propostasQ.data) ? propostasQ.data : [propostasQ.data].filter(Boolean);
-          c.innerHTML = '<div class="card">' + arr.map(function (p) { return '<div><strong>' + esc(p.titulo || p.origem_proposta || 'Proposta vigente') + '</strong><div class="text-muted">' + data(p.data_inicio_proposta_vigente) + ' até ' + data(p.data_fim_proposta_vigente) + ' • ' + moeda(p.preco_proposta_r_m2) + '/m²</div></div>'; }).join('<div class="sep"></div>') + '</div>';
-          return;
-        }
-        if (state.unidadeTab === 'acoes') {
-          c.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Processo</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Aviso</th></tr></thead><tbody>' + (acaoQ.data || []).map(function (x) { var a = x.v_acao_completa || {}; return '<tr class="' + (a.mensagem_aviso_1_mes ? 'row-alert-1m' : a.mensagem_aviso_2_meses ? 'row-alert-2m' : '') + '"><td>' + esc(a.descricao) + '</td><td>' + esc(a.no_processo || '-') + '</td><td>' + esc(a.tipo || '-') + '</td><td>' + moeda(a.valor) + '</td><td>' + data(a.data) + '</td><td>' + esc(a.mensagem_aviso_1_mes || a.mensagem_aviso_2_meses || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-          return;
-        }
-        c.innerHTML = '<div class="toolbar"><button class="btn btn-primary" id="btn-nova-transacao">＋ Criar nova transação</button></div><div id="lista-tr"></div>';
-        document.getElementById('lista-tr').innerHTML = trans.map(function (t) {
-          var sign = (t.transacao_signatario || []).map(function (s) { return s.pessoa && s.pessoa.nome_completo; }).filter(Boolean)[0] || '-';
-          var exp = t.data_assinatura && t.vigencia_meses ? new Date(new Date(t.data_assinatura).setMonth(new Date(t.data_assinatura).getMonth() + Number(t.vigencia_meses))).toLocaleDateString('pt-BR') : '-';
-          return '<div class="card" style="margin-bottom:10px"><div style="display:flex; justify-content:space-between; gap:10px;"><h3 style="margin:0">' + esc((t.tipo || '-') + ' entre ' + (u.empreendimento_sigla || '') + ' e ' + sign) + '</h3><strong class="text-accent">' + moeda(t.preco_base_r_m2 || 0) + ' /m²</strong></div><div class="sep"></div><div class="metrics metrics-4"><div class="metric-item"><h4>Assinatura</h4><p>' + data(t.data_assinatura) + '</p></div><div class="metric-item"><h4>Expiração</h4><p>' + exp + '</p></div><div class="metric-item"><h4>Rescisão</h4><p>' + data(t.data_rescisao) + '</p></div><div class="metric-item"><h4>Código Minuta</h4><p>' + esc(t.codigo_minuta || '-') + '</p></div></div></div>';
-        }).join('') || '<div class="card">Sem transações.</div>';
-        var btn = document.getElementById('btn-nova-transacao');
-        if (btn) btn.addEventListener('click', function () { openNovaTransacao(u); });
-      }
-
-      async function openNovaTransacao(unidade) {
-        var overlay = document.createElement('div');
-        overlay.className = 'modal-overlay';
-        overlay.innerHTML = '<div class="modal"><h3>Nova transação</h3><div class="modal-grid">' +
-          '<label>Tipo<select id="m-tipo"><option>Pré-Contrato Regularização</option><option>CP</option><option>Escritura</option><option>Cessão</option><option>Simulação</option></select></label>' +
-          '<label>Forma de Pagamento<select id="m-forma"><option>Á Vista</option><option>6x</option><option>12x</option><option>Outras Parcelas</option></select></label>' +
-          '<label>Data de Assinatura<input id="m-data" type="date" /></label>' +
-          '<label>Vigência (meses)<input id="m-vig" type="number" min="1" value="12" /></label>' +
-          '<label>Sinal<input id="m-sinal" type="number" min="0" step="0.01" value="0" /></label>' +
-          '<label>Parcelas digitado<input id="m-parc" type="number" min="0" value="0" /></label>' +
-          '<label>Índice Correção<select id="m-ind"><option>IPCA</option><option>IGPM</option><option>INCC</option><option>Sem Índice</option></select></label>' +
-          '</div><div class="modal-actions"><button class="btn" id="m-cancel">Cancelar</button><button class="btn btn-primary" id="m-save">Salvar</button></div></div>';
-        document.body.appendChild(overlay);
-        document.getElementById('m-cancel').onclick = function () { overlay.remove(); };
-        document.getElementById('m-save').onclick = async function () {
-          try {
-            var pr = await db.rpc('get_proposta_vigente_unidade', { p_unidade_id: unidade.id });
-            if (pr.error) throw pr.error;
-            var propostaId = Array.isArray(pr.data) ? (pr.data[0] && pr.data[0].id) : (pr.data && pr.data.id);
-            var payload = {
-              unidade_id: unidade.id,
-              proposta_id: propostaId || null,
-              tipo: document.getElementById('m-tipo').value,
-              forma_pagamento: document.getElementById('m-forma').value,
-              data_assinatura: document.getElementById('m-data').value || null,
-              vigencia_meses: Number(document.getElementById('m-vig').value) || 0,
-              sinal: Number(document.getElementById('m-sinal').value) || 0,
-              parcelas_digitado_meses: Number(document.getElementById('m-parc').value) || 0,
-              indice_correcao: document.getElementById('m-ind').value
-            };
-            var ins = await db.from('transacao').insert(payload);
-            if (ins.error) throw ins.error;
-            overlay.remove();
-            renderUnidade(unidade.id);
-          } catch (e) { alert('Erro ao salvar transação: ' + ((e && e.message) || e)); }
-        };
-      }
-
-      draw();
-      bind('.tab-btn', 'click', function (e) { state.unidadeTab = e.currentTarget.getAttribute('data-tab'); document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.toggle('active', b === e.currentTarget); }); draw(); });
-      var quitBtn = document.getElementById('btn-quitado');
-      if (quitBtn) quitBtn.addEventListener('click', async function () {
-        var up = await db.from('unidade').update({ quitado: true }).eq('id', u.id);
-        if (up.error) return alert('Erro ao atualizar: ' + up.error.message);
-        renderUnidade(u.id);
-      });
-    } catch (e) { erro(e); }
-  }
-
-  async function renderMoradores() {
-    loading();
-    try {
-      assertDb();
-      var q = await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade(id, v_unidade_completa(endereco, empreendimento_nome)))');
-      if (q.error) throw q.error;
-      var rows = q.data || [];
-      app.innerHTML = '<div class="page-header"><h1 class="page-title">Moradores</h1></div><div class="toolbar"><input id="m-search" class="input" placeholder="Buscar por nome ou CPF" /></div><div class="table-wrap"><table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Email</th><th>Unidade(s)</th></tr></thead><tbody id="m-tb"></tbody></table></div>';
-      function draw(f) {
-        f = (f || '').toLowerCase();
-        var fl = rows.filter(function (r) { return !f || String(r.nome_completo || '').toLowerCase().includes(f) || String(r.cpf || '').toLowerCase().includes(f); });
-        document.getElementById('m-tb').innerHTML = fl.map(function (r) {
-          var unidades = (r.unidade_pessoa || []).map(function (u) {
-            var uobj = u.unidade || {}; var v = uobj.v_unidade_completa || {};
-            return '<a href="#unidade/' + uobj.id + '">' + esc((v.endereco || 'Unidade') + ' - ' + (v.empreendimento_nome || '')) + '</a>';
-          }).join('<br>');
-          return '<tr><td>' + esc(r.nome_completo) + '</td><td>' + esc(r.cpf || '-') + '</td><td>' + esc(r.telefone || '-') + '</td><td>' + esc(r.email || '-') + '</td><td>' + (unidades || '-') + '</td></tr>';
-        }).join('') || '<tr><td colspan="5">Sem moradores.</td></tr>';
-      }
-      draw('');
-      document.getElementById('m-search').addEventListener('input', function (e) { draw(e.target.value); });
-    } catch (e) { erro(e); }
-  }
-
-  async function renderAcoes() {
-    loading();
-    try {
-      assertDb();
-      var q = await db.from('v_acao_completa').select('*').order('dias_restantes', { ascending: true });
-      if (q.error) throw q.error;
-      var rows = q.data || [];
-      app.innerHTML = '<div class="page-header"><h1 class="page-title">Ações</h1></div><div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Nº Processo</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th><th>Aviso</th></tr></thead><tbody>' + rows.map(function (r) {
-        return '<tr class="' + (r.mensagem_aviso_1_mes ? 'row-alert-1m' : r.mensagem_aviso_2_meses ? 'row-alert-2m' : '') + '"><td>' + esc(r.descricao) + '</td><td>' + esc(r.no_processo || '-') + '</td><td>' + esc(r.tipo || '-') + '</td><td>' + moeda(r.valor) + '</td><td>' + data(r.data) + '</td><td>' + num(r.dias_restantes) + '</td><td>' + esc(r.mensagem_aviso_1_mes || r.mensagem_aviso_2_meses || '-') + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    } catch (e) { erro(e); }
-  }
-
-  async function router() {
-    var r = routeInfo();
-    setActiveNav(r.route);
-    if (r.route === 'setor' && r.id) return renderSetorDetalhe(r.id);
-    if (r.route === 'empreendimento' && r.id) return renderEmpDetalhe(r.id);
-    if (r.route === 'unidade' && r.id) return renderUnidade(r.id);
-    if (r.route === 'empreendimentos') return renderEmpreendimentos();
-    if (r.route === 'moradores') return renderMoradores();
-    if (r.route === 'acoes') return renderAcoes();
-    return renderSetores();
-  }
-
-  window.addEventListener('hashchange', router);
-  if (!window.location.hash) window.location.hash = '#setores';
-  router();
-})();
+// PÁGINA 7 — AÇÕES
+async function renderAcoes() {
+  const app = document.getElementById('app')
+  const { data, error } = await db.from('v_acao_completa').select('*').order('dias_restantes', {ascending: true})
+  if (error) { app.innerHTML = `<div class="error">${error.message}</div>`; return }
+  app.innerHTML = `
+    <h1 class="page-title">Ações</h1>
+    <table>
+      <thead><tr><th>Descrição</th><th>Nº Processo</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th><th>Aviso</th></tr></thead>
+      <tbody>${(data||[]).map(a => `
+        <tr class="${a.mensagem_aviso_1_mes?'urgente':a.mensagem_aviso_2_meses?'atencao':''}">
+          <td>${a.descricao||'-'}</td><td>${a.no_processo||'-'}</td><td>${a.tipo||'-'}</td>
+          <td>${moeda(a.valor)}</td><td>${dt(a.data)}</td><td>${num(a.dias_restantes)}</td>
+          <td style="color:var(--red)">${a.mensagem_aviso_1_mes||a.mensagem_aviso_2_meses||''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`
+}

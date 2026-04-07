@@ -1,0 +1,57 @@
+name: Sync Airtable -> Supabase
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar secrets obrigatórios
+        run: |
+          missing=""
+          [ -z "$AIRTABLE_TOKEN" ]          && missing="$missing AIRTABLE_TOKEN"
+          [ -z "$AIRTABLE_BASE_ID" ]        && missing="$missing AIRTABLE_BASE_ID"
+          [ -z "$SUPABASE_URL" ]            && missing="$missing SUPABASE_URL"
+          [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "$AIRTABLE_MAPPING_JSON" ]   && missing="$missing AIRTABLE_MAPPING_JSON"
+          if [ -n "$missing" ]; then
+            echo "❌ Secrets não configurados:$missing"
+            echo "Acesse: Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          echo "✓ Todos os secrets estão configurados."
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AIRTABLE_MAPPING_JSON: ${{ secrets.AIRTABLE_MAPPING_JSON }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: Criar arquivo de mapeamento
+        run: |
+          mkdir -p airtable
+          printf '%s' '${{ secrets.AIRTABLE_MAPPING_JSON }}' > airtable/mapping.json
+          # Valida que é JSON válido
+          node -e "JSON.parse(require('fs').readFileSync('airtable/mapping.json','utf-8'))" || \
+            { echo '❌ AIRTABLE_MAPPING_JSON não é um JSON válido'; exit 1; }
+          echo "✓ mapping.json criado e validado."
+
+      - name: Executar sincronização
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          AIRTABLE_MAPPING_PATH: airtable/mapping.json
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync:airtable
