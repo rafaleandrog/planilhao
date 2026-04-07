@@ -1,0 +1,4 @@
+window.APP_CONFIG = {
+  SUPABASE_URL: 'https://vhjgfkjlxfajytazxvvu.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoamdma2pseGZhanl0YXp4dnZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NDcxMzEsImV4cCI6MjA4OTQyMzEzMX0.2t_ua2CedFmBh7M7ufP6sOGR0u686rqClRdXDHnFxkM'
+};

@@ -1,0 +1,77 @@
+# Painel Habitacional (GitHub Pages + Supabase)
+
+Este projeto foi ajustado para operar **exclusivamente com Supabase**.
+
+- ❌ Airtable removido da arquitetura.
+- ✅ Interface web no GitHub Pages lendo/escrevendo direto no Supabase.
+- ✅ Atualização automática no front-end via Supabase Realtime.
+
+---
+
+## Arquitetura atual
+
+`GitHub Pages (index.html + app.js) <-> Supabase (Postgres + Realtime)`
+
+A aplicação:
+
+1. carrega dados do Supabase;
+2. permite criar/editar/excluir registros;
+3. aplica alterações no banco imediatamente;
+4. escuta eventos Realtime para refletir alterações automáticas na tela.
+
+---
+
+## 1) Preparar banco no Supabase
+
+No SQL Editor do Supabase, execute `supabase/schema.sql`.
+
+O schema cria as tabelas:
+
+- `setores`
+- `empreendimentos`
+- `unidades`
+- `proprietarios`
+- `unidade_proprietarios`
+- `transacoes`
+
+Também ativa RLS e políticas iniciais para uso no painel.
+
+> Importante: para produção, refine as políticas RLS de acordo com suas regras de acesso.
+
+---
+
+## 2) Configurar conexão no front-end
+
+Edite `config.js` com os dados do seu projeto:
+
+```js
+window.APP_CONFIG = {
+  SUPABASE_URL: 'https://SEU-PROJETO.supabase.co',
+  SUPABASE_ANON_KEY: 'SUA_ANON_KEY'
+};
+```
+
+Com isso, o front-end no GitHub Pages já consegue autenticar como `anon` e operar nas tabelas.
+
+---
+
+## 3) Publicar no GitHub Pages
+
+1. Faça `git push` na branch.
+2. No GitHub: **Settings → Pages**.
+3. Source: **Deploy from a branch**.
+4. Selecione a branch e pasta `/root`.
+
+Após publicado, a página já abre o painel conectado ao Supabase.
+
+---
+
+## 4) Informações que preciso de você para fechar 100% com sua conta
+
+Para conectar corretamente ao seu projeto Supabase, me envie:
+
+1. **SUPABASE_URL** do seu projeto.
+2. **SUPABASE_ANON_KEY** do projeto.
+3. Confirmação se quer manter acesso público (`anon`) com RLS aberto inicialmente, ou se prefere que eu restrinja políticas por usuário autenticado.
+
+Se quiser, eu também posso te entregar uma versão com login e permissões por usuário (Auth + RLS por `auth.uid()`).

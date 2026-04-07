@@ -1,0 +1,12 @@
+{
+  "name": "planilhao",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "codex:task": "node scripts/codex-supabase-orchestrator.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "dotenv": "^16.4.5"
+  }
+}
