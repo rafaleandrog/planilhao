@@ -1,8 +1,0 @@
-# Copie este arquivo para ~/.codex/config.toml (ou mescle com sua config atual)
-# para habilitar o MCP do Supabase no Codex CLI.
-
-[mcp_servers.supabase]
-url = "https://mcp.supabase.com/mcp"
-
-[features]
-rmcp_client = true
