@@ -294,3 +294,174 @@ async function loadAcoesEmp(id) {
       <td>${num(a.dias_restantes)} ${a.mensagem_aviso_1_mes?'⚠️':''}</td></tr>`).join('')}
   </tbody></table>`
 }
+
+// PÁGINA 5 — DETALHE DA UNIDADE
+async function renderUnidade(id) {
+  const app = document.getElementById('app')
+  const [{ data: u }, { data: props }, { data: trans }] = await Promise.all([
+    db.from('v_unidade_completa').select('*').eq('id', id).single(),
+    db.from('unidade_pessoa').select('pessoa(nome_completo, cpf, telefone, email)').eq('unidade_id', id),
+    db.from('transacao').select('*, transacao_signatario(pessoa(nome_completo))').eq('unidade_id', id).order('data_assinatura', {ascending: false})
+  ])
+  if (!u) { app.innerHTML = '<div class="error">Unidade não encontrada.</div>'; return }
+  const proprietario = props?.[0]?.pessoa?.nome_completo || '-'
+  function calcExpiracao(t) {
+    if (!t.data_assinatura || !t.vigencia_meses) return '-'
+    const d = new Date(t.data_assinatura); d.setMonth(d.getMonth() + t.vigencia_meses)
+    return d.toLocaleDateString('pt-BR')
+  }
+  function signatario(t) {
+    const s = t.transacao_signatario?.[0]?.pessoa?.nome_completo
+    return s || '-'
+  }
+  app.innerHTML = `
+    <div class="detail-header">
+      <h1 style="font-size:22px;font-weight:700;margin-bottom:8px">${u.endereco||'-'}</h1>
+      <div class="badges-row">
+        <span class="badge badge-white">${u.empreendimento_nome||'-'}</span>
+        ${badgeLote(u.status_lote)}
+      </div>
+      <div style="margin:8px 0;font-size:15px;font-weight:600">${proprietario}</div>
+      ${!u.quitado && u.preco_total_proposta_vigente ? `<div style="margin-bottom:12px">Valor da unidade: <strong>${moeda(u.preco_total_proposta_vigente)}</strong></div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0">
+        <div class="metric-card"><div class="metric-label">Área (m²)</div><div class="metric-value">${num(u.area_m2)}</div></div>
+        <div class="metric-card"><div class="metric-label">Matrícula</div><div class="metric-value">${num(u.matricula)}</div></div>
+        <div class="metric-card"><div class="metric-label">Uso</div><div class="metric-value"><span class="badge badge-blue">${u.uso||'-'}</span></div></div>
+        <div class="metric-card"><div class="metric-label">Tipo Lote</div><div class="metric-value">${u.tipo_lote||'-'}</div></div>
+      </div>
+      ${!u.quitado ? `<button class="btn btn-green" onclick="window._marcarQuitado('${id}')">&#10003; Marcar como quitado</button>` : ''}
+    </div>
+    <div class="price-table">
+      <div class="price-col"><label>Preço Proposta Vigente (R\$/m²)</label><span>${moeda(u.preco_proposta_r_m2)}</span></div>
+      <div class="price-col"><label>Preço Estático (R\$/m²)</label><span>${trans?.[0]?.preco_estatico_r_m2 ? moeda(trans[0].preco_estatico_r_m2) : '-'}</span></div>
+      <div class="price-col"><label>Preço Final (R\$/m²)</label><span>${trans?.[0]?.preco_base_input_r_m2 ? moeda(trans[0].preco_base_input_r_m2) : '-'}</span></div>
+    </div>
+    <div style="margin:12px 0 20px">
+      <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Assinatura Pré-Contrato:</span> ${dt(u.data_assinatura_pre_contrato)}</div>
+      <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Assinatura CP:</span> ${dt(u.data_assinatura_cp)}</div>
+      <div><span style="color:var(--text-muted)">Assinatura Escritura:</span> ${dt(u.data_assinatura_escritura)}</div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab3('trans','pvigs','uacoes',this)">Transações</div>
+      <div class="tab" onclick="showTab3('pvigs','trans','uacoes',this)">Propostas Vigentes</div>
+      <div class="tab" onclick="showTab3('uacoes','trans','pvigs',this)">Ções</div>
+    </div>
+    <div id="tab-trans">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-blue" onclick="window._abrirModal('${id}')">&#65291; Criar nova transação</button>
+      </div>
+      ${(trans||[]).map(t => `
+        <div class="transacao-item">
+          <div class="transacao-header">
+            <div class="transacao-title">${t.tipo||''} entre ${u.empreendimento_sigla||''} ${u.numero||''} e ${signatario(t)}</div>
+            <div class="transacao-price">${moeda(t.preco_base_input_r_m2)}/m²</div>
+          </div>
+          <div class="transacao-meta">
+            <div class="transacao-meta-item"><label>Data Assinatura</label><span>${dt(t.data_assinatura)}</span></div>
+            <div class="transacao-meta-item"><label>Data Expiração</label><span>${calcExpiracao(t)}</span></div>
+            <div class="transacao-meta-item"><label>Data Rescisão</label><span>${dt(t.data_rescisao)}</span></div>
+            <div class="transacao-meta-item"><label>Código Minuta</label><span>${t.codigo_minuta_contrato||'-'}</span></div>
+          </div>
+        </div>`).join('') || '<p style="color:var(--text-muted)">Nenhuma transação registrada.</p>'}
+    </div>
+    <div id="tab-pvigs" style="display:none"><div class="loading">Carregando...</div></div>
+    <div id="tab-uacoes" style="display:none"><p style="color:var(--text-muted)">Ções da unidade.</p></div>
+    <div id="modal-trans" style="display:none">
+      <div class="modal-overlay">
+        <div class="modal">
+          <h3>Nova Transação</h3>
+          <div class="form-group"><label>Tipo</label><select id="t-tipo"><option>Pré-Contrato Regularização</option><option>CP</option><option>Escritura</option><option>Cessão</option><option>Simulação</option></select></div>
+          <div class="form-group"><label>Forma de Pagamento</label><select id="t-forma"><option>Á Vista</option><option>6x</option><option>12x</option><option>Outras Parcelas</option></select></div>
+          <div class="form-group"><label>Data de Assinatura</label><input type="date" id="t-data"></div>
+          <div class="form-group"><label>Vigência (meses)</label><input type="number" id="t-vig" placeholder="0"></div>
+          <div class="form-group"><label>Sinal (R\$)</label><input type="number" id="t-sinal" placeholder="0.00"></div>
+          <div class="form-group"><label>Parcelas digitado</label><input type="number" id="t-parc" placeholder="0"></div>
+          <div class="form-group"><label>Índice Correção</label><select id="t-indice"><option>IPCA</option><option>IGPM</option><option>INCC</option><option>Sem Índice</option></select></div>
+          <div class="modal-footer">
+            <button class="btn-cancel" onclick="document.getElementById('modal-trans').style.display='none'">Cancelar</button>
+            <button class="btn btn-blue" onclick="window._salvarTransacao('${id}')">Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>`
+  window._marcarQuitado = async (uid) => {
+    if (!confirm('Marcar esta unidade como quitada?')) return
+    await db.from('unidade').update({ quitado: true }).eq('id', uid)
+    renderUnidade(uid)
+  }
+  window._abrirModal = () => { document.getElementById('modal-trans').style.display = '' }
+  window._salvarTransacao = async (uid) => {
+    const { data: pid } = await db.rpc('get_proposta_vigente_unidade', { p_unidade_id: uid })
+    const { error } = await db.from('transacao').insert({
+      unidade_id: uid, proposta_id: pid,
+      tipo: document.getElementById('t-tipo').value,
+      forma_pagamento: document.getElementById('t-forma').value,
+      data_assinatura: document.getElementById('t-data').value || null,
+      vigencia_meses: parseInt(document.getElementById('t-vig').value) || null,
+      sinal: parseFloat(document.getElementById('t-sinal').value) || null,
+      parcelas_digitado_meses: parseInt(document.getElementById('t-parc').value) || null,
+      indice_correcao: document.getElementById('t-indice').value
+    })
+    if (error) { alert('Erro: ' + error.message); return }
+    document.getElementById('modal-trans').style.display = 'none'
+    renderUnidade(uid)
+  }
+  loadPropostasUnidade(id)
+}
+function showTab3(show, h1, h2, btn) {
+  ['tab-'+show,'tab-'+h1,'tab-'+h2].forEach((id,i) => {
+    const el = document.getElementById(id); if(el) el.style.display = i===0?'':'none'
+  })
+  btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  btn.classList.add('active')
+}
+async function loadPropostasUnidade(id) {
+  const { data } = await db.from('proposta_unidade').select('proposta(titulo, data_proposta, data_fim_vigencia, preco_proposta_r_m2, tipo)').eq('unidade_id', id)
+  const el = document.getElementById('tab-pvigs'); if (!el) return
+  if (!data?.length) { el.innerHTML = '<p class="loading">Herda proposta do Empreendimento ou Setor.</p>'; return }
+  el.innerHTML = data.map(r => r.proposta).filter(Boolean).map(p => `
+    <div class="transacao-item"><strong>${p.titulo}</strong>
+    <div style="color:var(--text-muted);font-size:13px;margin-top:6px">${dt(p.data_proposta)} → ${dt(p.data_fim_vigencia)} · ${moeda(p.preco_proposta_r_m2)}/m²</div></div>`).join('')
+}
+
+// PÁGINA 6 — MORADORES
+async function renderMoradores() {
+  const app = document.getElementById('app')
+  app.innerHTML = '<h1 class="page-title">Moradores</h1><div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Buscar por nome ou CPF" oninput="window._buscaMorador(this.value)"></div><div id="morador-lista"><div class="loading">Carregando...</div></div>'
+  const { data, error } = await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade_id, unidade(id))')
+  if (error) { document.getElementById('morador-lista').innerHTML = `<div class="error">${error.message}</div>`; return }
+  let todos = data || []
+  function render(lista) {
+    document.getElementById('morador-lista').innerHTML = `<table>
+      <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Email</th><th>Unidade(s)</th></tr></thead>
+      <tbody>${lista.map(p => `<tr>
+        <td>${p.nome_completo||'-'}</td><td>${p.cpf||'-'}</td>
+        <td>${p.telefone||'-'}</td><td>${p.email||'-'}</td>
+        <td>${(p.unidade_pessoa||[]).map(u => `<a href="#unidade/${u.unidade_id}" style="color:var(--blue);margin-right:6px">Ver unidade</a>`).join('') || '-'}</td>
+      </tr>`).join('')}</tbody></table>`
+  }
+  window._buscaMorador = (v) => {
+    const q = v.toLowerCase()
+    render(todos.filter(p => p.nome_completo?.toLowerCase().includes(q) || p.cpf?.includes(q)))
+  }
+  render(todos)
+}
+
+// PÁGINA 7 — AÇÕES
+async function renderAcoes() {
+  const app = document.getElementById('app')
+  const { data, error } = await db.from('v_acao_completa').select('*').order('dias_restantes', {ascending: true})
+  if (error) { app.innerHTML = `<div class="error">${error.message}</div>`; return }
+  app.innerHTML = `
+    <h1 class="page-title">Ações</h1>
+    <table>
+      <thead><tr><th>Descrição</th><th>Nº Processo</th><th>Tipo</th><th>Valor</th><th>Data</th><th>Dias Restantes</th><th>Aviso</th></tr></thead>
+      <tbody>${(data||[]).map(a => `
+        <tr class="${a.mensagem_aviso_1_mes?'urgente':a.mensagem_aviso_2_meses?'atencao':''}">
+          <td>${a.descricao||'-'}</td><td>${a.no_processo||'-'}</td><td>${a.tipo||'-'}</td>
+          <td>${moeda(a.valor)}</td><td>${dt(a.data)}</td><td>${num(a.dias_restantes)}</td>
+          <td style="color:var(--red)">${a.mensagem_aviso_1_mes||a.mensagem_aviso_2_meses||''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`
+}
