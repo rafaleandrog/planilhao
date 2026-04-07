@@ -92,7 +92,9 @@ function route() {
     document.getElementById('app').innerHTML = `
       <div style="color:#ff6b6b;padding:40px;max-width:760px">
         <h2 style="margin-top:0">Credenciais do Supabase não configuradas</h2>
-        <p>Configure os secrets <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no GitHub Actions, ou informe temporariamente pela URL:</p>
+        <p>Configure os secrets/variables <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no GitHub Actions.</p>
+        <p>Se já configurou e ainda falha, verifique em <strong>Settings → Pages</strong> se o source está em <strong>gh-pages</strong> (ou GitHub Actions), não em <strong>main/root</strong>.</p>
+        <p>Para diagnóstico imediato, informe temporariamente pela URL:</p>
         <pre style="background:#111;padding:12px;border-radius:8px;white-space:pre-wrap">?supabase_url=https://SEU-PROJETO.supabase.co&supabase_anon_key=SUA_CHAVE_ANON</pre>
         <p style="margin-top:10px">As credenciais informadas por query string ficam salvas no navegador para os próximos acessos.</p>
       </div>`
