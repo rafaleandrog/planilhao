@@ -3,35 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Painel Habitacional</title>
-    <link rel="stylesheet" href="styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="config.js"></script>
-    <script defer src="app.js"></script>
+    <title>Clientes UP</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="layout">
-      <aside class="sidebar">
-        <div>
-          <div class="brand">UP</div>
-          <nav>
-            <button data-route="#/" class="nav-item">Home</button>
-            <button data-route="#/setores" class="nav-item">Setores Habitacionais</button>
-            <button data-route="#/empreendimentos" class="nav-item">Empreendimentos</button>
-            <button data-route="#/unidades" class="nav-item">Unidades</button>
-          </nav>
+    <aside class="sidebar">
+      <div>
+        <div class="logo-wrap">
+          <div class="logo">UP</div>
         </div>
-        <small class="muted">Painel ligado ao Supabase</small>
-      </aside>
+        <nav id="main-nav" class="nav-links">
+          <a href="#setores" data-route="setores" class="nav-link">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 7v11H3V10l9-7zm0 2.5L5 10.9V19h14v-8.1L12 5.5z"/></svg>
+            <span>Home</span>
+          </a>
+          <a href="#setores" data-route="setores" class="nav-link">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5v10l-9 5-9-5V7l9-5zm0 2.2L5 8v8l7 3.9 7-3.9V8l-7-3.8z"/></svg>
+            <span>Setores Habitacionais</span>
+          </a>
+          <a href="#empreendimentos" data-route="empreendimentos" class="nav-link">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19V7l6-3 6 3 6-3v15H3zm2-2h14V7.2l-4 2-6-3-4 2V17zm3-1h2v-4H8v4zm3 0h2v-6h-2v6zm3 0h2v-3h-2v3z"/></svg>
+            <span>Empreendimentos</span>
+          </a>
+          <a href="#moradores" data-route="moradores" class="nav-link">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.9 0-9 2.2-9 5v3h18v-3c0-2.8-4.1-5-9-5zm0 2c4.2 0 7 1.8 7 3v1H5v-1c0-1.2 2.8-3 7-3z"/></svg>
+            <span>Moradores</span>
+          </a>
+          <a href="#acoes" data-route="acoes" class="nav-link">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4v6c0 5-3.4 9.8-8 11-4.6-1.2-8-6-8-11V7l8-4zm0 2.2L6 8v5c0 3.9 2.5 7.7 6 8.9 3.5-1.2 6-5 6-8.9V8l-6-2.8zm-1 3.8h2v6h-2V9zm0 7h2v2h-2v-2z"/></svg>
+            <span>Ações</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
 
-      <main class="main-content">
-        <header class="topbar">
-          <h1 id="page-title">Painel Habitacional</h1>
-          <span id="conn-status" class="tag">Modo demo</span>
-        </header>
-        <div id="alerts"></div>
-        <section id="app"></section>
-      </main>
-    </div>
+    <main class="main-content">
+      <div id="app" class="app-shell"></div>
+    </main>
+
+    <script src="./config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="./app.js"></script>
   </body>
 </html>
