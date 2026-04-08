@@ -44,12 +44,21 @@ function loadSupabaseConfig() {
       ? cleanConfigValue(fromQuery.SUPABASE_ANON_KEY || stored.SUPABASE_ANON_KEY || '')
       : cleanConfigValue(configured.SUPABASE_ANON_KEY)
   }
+  const source = {
+    SUPABASE_URL: isPlaceholder(configured.SUPABASE_URL)
+      ? (fromQuery.SUPABASE_URL ? 'query_string' : (stored.SUPABASE_URL ? 'local_storage' : 'missing'))
+      : 'config.js',
+    SUPABASE_ANON_KEY: isPlaceholder(configured.SUPABASE_ANON_KEY)
+      ? (fromQuery.SUPABASE_ANON_KEY ? 'query_string' : (stored.SUPABASE_ANON_KEY ? 'local_storage' : 'missing'))
+      : 'config.js'
+  }
 
   if (resolved.SUPABASE_URL && resolved.SUPABASE_ANON_KEY) {
     saveConfig(resolved)
   }
 
   window.APP_CONFIG = resolved
+  window.APP_CONFIG_SOURCE = source
   return resolved
 }
 
@@ -131,11 +140,14 @@ window.addEventListener('hashchange', route)
 window.addEventListener('load', route)
 async function route() {
   if (!window.APP_CONFIG?.SUPABASE_URL || !window.APP_CONFIG?.SUPABASE_ANON_KEY || isPlaceholder(window.APP_CONFIG.SUPABASE_URL) || isPlaceholder(window.APP_CONFIG.SUPABASE_ANON_KEY)) {
+    const src = window.APP_CONFIG_SOURCE || {}
     document.getElementById('app').innerHTML = `
       <div style="color:#ff6b6b;padding:40px;max-width:760px">
         <h2 style="margin-top:0">Credenciais do Supabase não configuradas</h2>
         <p>Configure os secrets/variables <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no GitHub Actions.</p>
         <p>Se já configurou e ainda falha, verifique em <strong>Settings → Pages</strong> se o source está em <strong>gh-pages</strong> (ou GitHub Actions), não em <strong>main/root</strong>.</p>
+        <p style="margin:8px 0 0">Origem detectada URL: <strong>${src.SUPABASE_URL || 'missing'}</strong> · KEY: <strong>${src.SUPABASE_ANON_KEY || 'missing'}</strong></p>
+        <p style="margin-top:6px">Dica: no GitHub, os valores dos secrets <em>não ficam visíveis</em> após salvar (isso é normal por segurança).</p>
         <p>Para diagnóstico imediato, informe temporariamente pela URL:</p>
         <pre style="background:#111;padding:12px;border-radius:8px;white-space:pre-wrap">?supabase_url=https://SEU-PROJETO.supabase.co&supabase_anon_key=SUA_CHAVE_ANON</pre>
         <p style="margin-top:10px">As credenciais informadas por query string ficam salvas no navegador para os próximos acessos.</p>
