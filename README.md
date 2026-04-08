@@ -63,6 +63,14 @@ O app agora valida automaticamente:
 
 Se a conexão estiver ativa, mas o schema não bater com o esperado, a tela mostra um erro explícito com detalhes técnicos para facilitar a correção.
 
+### Secrets “sumindo” ao editar no GitHub
+
+Isso é comportamento normal do GitHub: depois que você salva um secret, o valor nunca mais aparece em texto puro.
+
+- Você verá apenas o nome do secret (`SUPABASE_URL`, `SUPABASE_ANON_KEY`) e o horário de atualização.
+- Para atualizar, clique em editar e cole novamente o valor completo.
+- O workflow de deploy valida se o `dist/config.js` foi realmente gerado sem `PLACEHOLDER`.
+
 ---
 
 ## 3) Publicar no GitHub Pages
