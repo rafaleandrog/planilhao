@@ -24,6 +24,7 @@ jobs:
             echo "Configure os secrets do repositório antes de publicar."
             exit 1
           fi
+          echo "✓ Secrets detectados para build de deploy."
 
       - name: Gerar build com credenciais
         env:
@@ -34,6 +35,14 @@ jobs:
           cp -R index.html app.js styles.css config.js dist/
           sed -i "s|SUPABASE_URL_PLACEHOLDER|$SUPABASE_URL|g" dist/config.js
           sed -i "s|SUPABASE_ANON_KEY_PLACEHOLDER|$SUPABASE_ANON_KEY|g" dist/config.js
+
+      - name: Validar config gerado
+        run: |
+          if grep -q "PLACEHOLDER" dist/config.js; then
+            echo "❌ dist/config.js ainda contém PLACEHOLDER. Verifique os secrets SUPABASE_URL/SUPABASE_ANON_KEY."
+            exit 1
+          fi
+          echo "✓ config.js gerado corretamente (sem placeholders)."
 
       - name: Deploy para GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

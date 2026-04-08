@@ -1,7 +1,14 @@
 const STORAGE_KEY = 'planilhao.supabase.config'
+let schemaProfile = 'unknown'
+let schemaDiagnostics = null
 
 function isPlaceholder(value) {
   return !value || String(value).includes('PLACEHOLDER')
+}
+
+function cleanConfigValue(value) {
+  if (typeof value !== 'string') return value || ''
+  return value.trim().replace(/^['"]|['"]$/g, '')
 }
 
 function getStoredConfig() {
@@ -31,11 +38,19 @@ function loadSupabaseConfig() {
 
   const resolved = {
     SUPABASE_URL: isPlaceholder(configured.SUPABASE_URL)
-      ? (fromQuery.SUPABASE_URL || stored.SUPABASE_URL || '')
-      : configured.SUPABASE_URL,
+      ? cleanConfigValue(fromQuery.SUPABASE_URL || stored.SUPABASE_URL || '')
+      : cleanConfigValue(configured.SUPABASE_URL),
     SUPABASE_ANON_KEY: isPlaceholder(configured.SUPABASE_ANON_KEY)
-      ? (fromQuery.SUPABASE_ANON_KEY || stored.SUPABASE_ANON_KEY || '')
-      : configured.SUPABASE_ANON_KEY
+      ? cleanConfigValue(fromQuery.SUPABASE_ANON_KEY || stored.SUPABASE_ANON_KEY || '')
+      : cleanConfigValue(configured.SUPABASE_ANON_KEY)
+  }
+  const source = {
+    SUPABASE_URL: isPlaceholder(configured.SUPABASE_URL)
+      ? (fromQuery.SUPABASE_URL ? 'query_string' : (stored.SUPABASE_URL ? 'local_storage' : 'missing'))
+      : 'config.js',
+    SUPABASE_ANON_KEY: isPlaceholder(configured.SUPABASE_ANON_KEY)
+      ? (fromQuery.SUPABASE_ANON_KEY ? 'query_string' : (stored.SUPABASE_ANON_KEY ? 'local_storage' : 'missing'))
+      : 'config.js'
   }
 
   if (resolved.SUPABASE_URL && resolved.SUPABASE_ANON_KEY) {
@@ -43,6 +58,7 @@ function loadSupabaseConfig() {
   }
 
   window.APP_CONFIG = resolved
+  window.APP_CONFIG_SOURCE = source
   return resolved
 }
 
@@ -51,10 +67,45 @@ let db = null
 try {
   const { createClient } = supabase
   if (!isPlaceholder(runtimeConfig.SUPABASE_URL) && !isPlaceholder(runtimeConfig.SUPABASE_ANON_KEY)) {
-    db = createClient(runtimeConfig.SUPABASE_URL, runtimeConfig.SUPABASE_ANON_KEY)
+    const url = new URL(runtimeConfig.SUPABASE_URL)
+    db = createClient(url.toString().replace(/\/$/, ''), runtimeConfig.SUPABASE_ANON_KEY)
   }
 } catch(e) {
   console.error('Supabase init error:', e)
+}
+
+function renderFatalError(message, details = '') {
+  const app = document.getElementById('app')
+  app.innerHTML = `
+    <div style="color:#ff6b6b;padding:40px;max-width:900px">
+      <h2 style="margin-top:0">Erro de conexão com o Supabase</h2>
+      <p>${message}</p>
+      ${details ? `<pre style="background:#111;padding:12px;border-radius:8px;white-space:pre-wrap">${details}</pre>` : ''}
+    </div>
+  `
+}
+
+async function detectSchemaProfile() {
+  if (!db) return { profile: 'unavailable', diagnostics: null }
+
+  const legacyProbe = await db.from('v_setor_resumo').select('id').limit(1)
+  if (!legacyProbe.error) return { profile: 'legacy', diagnostics: null }
+
+  const minimalProbe = await db.from('setores').select('id').limit(1)
+  if (!minimalProbe.error) {
+    return {
+      profile: 'minimal',
+      diagnostics: `Views legadas não encontradas (${legacyProbe.error.code || 'sem-código'}). Operando em modo compatível.`
+    }
+  }
+
+  return {
+    profile: 'invalid',
+    diagnostics: [
+      `v_setor_resumo: ${legacyProbe.error?.message || 'erro desconhecido'}`,
+      `setores: ${minimalProbe.error?.message || 'erro desconhecido'}`
+    ].join('\n')
+  }
 }
 
 // HELPERS
@@ -87,13 +138,16 @@ function setActive(page) {
 // ROUTER
 window.addEventListener('hashchange', route)
 window.addEventListener('load', route)
-function route() {
+async function route() {
   if (!window.APP_CONFIG?.SUPABASE_URL || !window.APP_CONFIG?.SUPABASE_ANON_KEY || isPlaceholder(window.APP_CONFIG.SUPABASE_URL) || isPlaceholder(window.APP_CONFIG.SUPABASE_ANON_KEY)) {
+    const src = window.APP_CONFIG_SOURCE || {}
     document.getElementById('app').innerHTML = `
       <div style="color:#ff6b6b;padding:40px;max-width:760px">
         <h2 style="margin-top:0">Credenciais do Supabase não configuradas</h2>
         <p>Configure os secrets/variables <code>SUPABASE_URL</code> e <code>SUPABASE_ANON_KEY</code> no GitHub Actions.</p>
         <p>Se já configurou e ainda falha, verifique em <strong>Settings → Pages</strong> se o source está em <strong>gh-pages</strong> (ou GitHub Actions), não em <strong>main/root</strong>.</p>
+        <p style="margin:8px 0 0">Origem detectada URL: <strong>${src.SUPABASE_URL || 'missing'}</strong> · KEY: <strong>${src.SUPABASE_ANON_KEY || 'missing'}</strong></p>
+        <p style="margin-top:6px">Dica: no GitHub, os valores dos secrets <em>não ficam visíveis</em> após salvar (isso é normal por segurança).</p>
         <p>Para diagnóstico imediato, informe temporariamente pela URL:</p>
         <pre style="background:#111;padding:12px;border-radius:8px;white-space:pre-wrap">?supabase_url=https://SEU-PROJETO.supabase.co&supabase_anon_key=SUA_CHAVE_ANON</pre>
         <p style="margin-top:10px">As credenciais informadas por query string ficam salvas no navegador para os próximos acessos.</p>
@@ -103,6 +157,7 @@ function route() {
   const hash = window.location.hash.slice(1) || 'setores'
   const app = document.getElementById('app')
   app.innerHTML = '<div class="loading">Carregando...</div>'
+  if (!await ensureRuntimeReady()) return
   if (hash === 'setores' || hash === '') { setActive('setores'); renderSetores() }
   else if (hash === 'empreendimentos') { setActive('empreendimentos'); renderEmpreendimentos() }
   else if (hash === 'moradores') { setActive('moradores'); renderMoradores() }
@@ -112,10 +167,47 @@ function route() {
   else if (hash.startsWith('unidade/')) { setActive('unidade'); renderUnidade(hash.split('/')[1]) }
 }
 
+async function ensureRuntimeReady() {
+  if (!db) {
+    renderFatalError('Cliente Supabase não foi inicializado.', 'Verifique SUPABASE_URL e SUPABASE_ANON_KEY (sem aspas extras e sem espaços).')
+    return false
+  }
+  if (schemaProfile === 'unknown') {
+    const probe = await detectSchemaProfile()
+    schemaProfile = probe.profile
+    schemaDiagnostics = probe.diagnostics
+  }
+  if (schemaProfile === 'invalid') {
+    renderFatalError('As credenciais foram aceitas, mas o schema necessário não foi encontrado neste projeto.', schemaDiagnostics || '')
+    return false
+  }
+  return true
+}
+
 // PÁGINA 1 — SETORES
 async function renderSetores() {
   const app = document.getElementById('app')
-  const { data, error } = await db.from('v_setor_resumo').select('*')
+  let data = []
+  let error = null
+  if (schemaProfile === 'legacy') {
+    const res = await db.from('v_setor_resumo').select('*')
+    data = res.data || []
+    error = res.error
+  } else {
+    const res = await db.from('setores').select('id,nome,descricao')
+    data = (res.data || []).map((s) => ({
+      ...s,
+      foto_url: null,
+      qntd_unidades: '-',
+      vgv_total: 0,
+      vgv_aderentes: 0,
+      vgv_nao_aderentes: 0,
+      qntd_condominios_registrados: '-',
+      qntd_condominios_aprovados: '-',
+      qntd_condominios_em_analise: '-'
+    }))
+    error = res.error
+  }
   if (error) { app.innerHTML = `<div class="error">Erro: ${error.message}</div>`; return }
   app.innerHTML = `
     <h1 class="page-title">Setores Habitacionais</h1>
@@ -143,6 +235,10 @@ async function renderSetores() {
 // PÁGINA 2 — DETALHE DO SETOR
 async function renderSetor(id) {
   const app = document.getElementById('app')
+  if (schemaProfile === 'minimal') {
+    app.innerHTML = '<div class="error">Detalhe de setor requer o schema legado (views e tabelas relacionais específicas).</div>'
+    return
+  }
   const [{ data: s, error: e1 }, { data: relacoes, error: e2 }] = await Promise.all([
     db.from('v_setor_resumo').select('*').eq('id', id).single(),
     db.from('empreendimento_setor').select('empreendimento_id').eq('setor_id', id)
@@ -232,17 +328,30 @@ function showTab(show, hide, btn) {
 // PÁGINA 3 — TODOS OS EMPREENDIMENTOS
 async function renderEmpreendimentos() {
   const app = document.getElementById('app')
-  const [{ data: emps }, { data: relacoes }] = await Promise.all([
-    db.from('v_empreendimento_resumo').select('*'),
-    db.from('empreendimento_setor').select('empreendimento_id, setor_id, setor_habitacional(nome)')
-  ])
+  const [{ data: emps }, { data: relacoes }] = schemaProfile === 'legacy'
+    ? await Promise.all([
+      db.from('v_empreendimento_resumo').select('*'),
+      db.from('empreendimento_setor').select('empreendimento_id, setor_id, setor_habitacional(nome)')
+    ])
+    : await Promise.all([
+      db.from('empreendimentos').select('id,nome,status_registro,vgv_total,setor_id'),
+      db.from('setores').select('id,nome')
+    ])
   const setorMap = {}
-  ;(relacoes||[]).forEach(r => { if (r.setor_habitacional) setorMap[r.empreendimento_id] = r.setor_habitacional.nome })
+  if (schemaProfile === 'legacy') {
+    ;(relacoes||[]).forEach(r => { if (r.setor_habitacional) setorMap[r.empreendimento_id] = r.setor_habitacional.nome })
+  } else {
+    const nomesSetor = Object.fromEntries((relacoes || []).map((s) => [s.id, s.nome]))
+    ;(emps || []).forEach((e) => { setorMap[e.id] = nomesSetor[e.setor_id] || '-' })
+  }
+  const normalizedEmps = (emps || []).map((e) => schemaProfile === 'legacy'
+    ? e
+    : ({ ...e, status: e.status_registro, foto_url: null, qntd_unidades: '-', adesometro_pct: null }))
   let busca = '', filtroSetor = 'Todos', filtroStatus = 'Todos'
   const setores = ['Todos','Boa Vista','Contagem 1','Contagem 2','Contagem 3','Grande Colorado']
   const statusList = ['Todos','Irregular','Em Análise','Caucionado','Aprovado','Registrado']
   function renderCards() {
-    let lista = emps || []
+    let lista = normalizedEmps || []
     if (busca) lista = lista.filter(e => e.nome?.toLowerCase().includes(busca.toLowerCase()) || e.sigla?.toLowerCase().includes(busca.toLowerCase()))
     if (filtroSetor !== 'Todos') lista = lista.filter(e => setorMap[e.id] === filtroSetor)
     if (filtroStatus !== 'Todos') lista = lista.filter(e => e.status === filtroStatus)
@@ -284,6 +393,10 @@ async function renderEmpreendimentos() {
 // PÁGINA 4 — DETALHE DO EMPREENDIMENTO
 async function renderEmpreendimento(id) {
   const app = document.getElementById('app')
+  if (schemaProfile === 'minimal') {
+    app.innerHTML = '<div class="error">Detalhe de empreendimento requer o schema legado (v_unidade_completa e tabelas auxiliares).</div>'
+    return
+  }
   const [{ data: e }, { data: unidades }] = await Promise.all([
     db.from('v_empreendimento_resumo').select('*').eq('id', id).single(),
     db.from('v_unidade_completa').select('*').eq('empreendimento_id', id)
@@ -366,6 +479,10 @@ async function loadAcoesEmp(id) {
 // PÁGINA 5 — DETALHE DA UNIDADE
 async function renderUnidade(id) {
   const app = document.getElementById('app')
+  if (schemaProfile === 'minimal') {
+    app.innerHTML = '<div class="error">Detalhe de unidade requer o schema legado (transação/proposta/pessoa).</div>'
+    return
+  }
   const [{ data: u }, { data: props }, { data: trans }] = await Promise.all([
     db.from('v_unidade_completa').select('*').eq('id', id).single(),
     db.from('unidade_pessoa').select('pessoa(nome_completo, cpf, telefone, email)').eq('unidade_id', id),
@@ -454,7 +571,8 @@ async function renderUnidade(id) {
     </div>`
   window._marcarQuitado = async (uid) => {
     if (!confirm('Marcar esta unidade como quitada?')) return
-    await db.from('unidade').update({ quitado: true }).eq('id', uid)
+    const table = schemaProfile === 'legacy' ? 'unidade' : 'unidades'
+    await db.from(table).update({ quitado: true }).eq('id', uid)
     renderUnidade(uid)
   }
   window._abrirModal = () => { document.getElementById('modal-trans').style.display = '' }
@@ -496,9 +614,20 @@ async function loadPropostasUnidade(id) {
 async function renderMoradores() {
   const app = document.getElementById('app')
   app.innerHTML = '<h1 class="page-title">Moradores</h1><div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Buscar por nome ou CPF" oninput="window._buscaMorador(this.value)"></div><div id="morador-lista"><div class="loading">Carregando...</div></div>'
-  const { data, error } = await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade_id, unidade(id))')
+  const { data, error } = schemaProfile === 'legacy'
+    ? await db.from('pessoa').select('id, nome_completo, cpf, telefone, email, unidade_pessoa(unidade_id, unidade(id))')
+    : await db.from('proprietarios').select('id,nome,cpf,telefone,email,unidade_proprietarios(unidade_id)')
   if (error) { document.getElementById('morador-lista').innerHTML = `<div class="error">${error.message}</div>`; return }
-  let todos = data || []
+  let todos = (data || []).map((p) => schemaProfile === 'legacy'
+    ? p
+    : ({
+      id: p.id,
+      nome_completo: p.nome,
+      cpf: p.cpf,
+      telefone: p.telefone,
+      email: p.email,
+      unidade_pessoa: (p.unidade_proprietarios || []).map((u) => ({ unidade_id: u.unidade_id }))
+    }))
   function render(lista) {
     document.getElementById('morador-lista').innerHTML = `<table>
       <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Email</th><th>Unidade(s)</th></tr></thead>
@@ -518,8 +647,18 @@ async function renderMoradores() {
 // PÁGINA 7 — AÇÕES
 async function renderAcoes() {
   const app = document.getElementById('app')
-  const { data, error } = await db.from('v_acao_completa').select('*').order('dias_restantes', {ascending: true})
+  const { data, error } = schemaProfile === 'legacy'
+    ? await db.from('v_acao_completa').select('*').order('dias_restantes', {ascending: true})
+    : { data: [], error: null }
   if (error) { app.innerHTML = `<div class="error">${error.message}</div>`; return }
+  if (schemaProfile === 'minimal') {
+    app.innerHTML = `
+      <h1 class="page-title">Ações</h1>
+      <p style="color:var(--text-muted)">Sem módulo de ações no schema mínimo do Supabase.</p>
+      ${schemaDiagnostics ? `<p style="color:var(--text-muted)">${schemaDiagnostics}</p>` : ''}
+    `
+    return
+  }
   app.innerHTML = `
     <h1 class="page-title">Ações</h1>
     <table>
